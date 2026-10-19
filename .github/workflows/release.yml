@@ -23,7 +23,7 @@ jobs:
             arch: aarch64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.arch }}-unknown-linux-musl
@@ -34,7 +34,7 @@ jobs:
       - name: Check that the version matches the tag
         run: test "$(./target/${{ matrix.arch }}-unknown-linux-musl/release/backlog --version)" = "backlog ${GITHUB_REF_NAME#v}"
       - run: cp target/${{ matrix.arch }}-unknown-linux-musl/release/backlog backlog-${{ matrix.arch }}-unknown-linux-musl
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.arch }}
           path: backlog-${{ matrix.arch }}-unknown-linux-musl
@@ -44,7 +44,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
