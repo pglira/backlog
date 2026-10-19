@@ -1,12 +1,19 @@
 //! Application state and key handling.
 
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{
+    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
+use ratatui::layout::Rect;
 
 use crate::backlog::{Backlog, Issue, Status};
 use crate::input::{LineEdit, Outcome};
 
 pub const FIELD_NAMES: [&str; 4] = ["Title", "Description", "Done when", "Notes"];
 const TITLE: usize = 0;
+/// Minimum width of the main area for the list and the details side by side.
+const WIDE: u16 = 90;
+/// Minimum size of a pane along the split direction.
+const MIN_PANE: u16 = 5;
 
 pub enum Mode {
     List,
@@ -67,6 +74,11 @@ pub struct App {
     pub query: String,
     pub message: Option<String>,
     page: usize,
+    /// Fraction of the main area that the list takes.
+    split: f32,
+    /// The main area of the last draw.
+    body: Rect,
+    dragging: bool,
 }
 
 impl App {
@@ -78,6 +90,99 @@ impl App {
             query: String::new(),
             message: None,
             page: 10,
+            split: 0.45,
+            body: Rect::default(),
+            dragging: false,
+        }
+    }
+
+    /// Split the main area into the list and the details: side by side when
+    /// it is wide enough, else one above the other.
+    pub fn split_body(&mut self, body: Rect) -> (Rect, Rect) {
+        self.body = body;
+        let wide = body.width >= WIDE;
+        let first = if wide {
+            self.split_size(body.width)
+        } else {
+            self.split_size(body.height)
+        };
+        let (a, b) = if wide {
+            let a = Rect {
+                width: first,
+                ..body
+            };
+            let b = Rect {
+                x: body.x + first,
+                width: body.width - first,
+                ..body
+            };
+            (a, b)
+        } else {
+            let a = Rect {
+                height: first,
+                ..body
+            };
+            let b = Rect {
+                y: body.y + first,
+                height: body.height - first,
+                ..body
+            };
+            (a, b)
+        };
+        (a, b)
+    }
+
+    fn split_size(&self, total: u16) -> u16 {
+        let max = total.saturating_sub(MIN_PANE);
+        let size = (total as f32 * self.split).round() as u16;
+        size.clamp(MIN_PANE.min(max), max)
+    }
+
+    /// Read the file again after another program changed it, and keep the
+    /// cursor on the same issue.
+    pub fn reload(&mut self) {
+        let id = self.selected().map(|i| i.id);
+        match Backlog::load(&self.backlog.path) {
+            Ok(backlog) => {
+                self.backlog = backlog;
+                if let Some(id) = id {
+                    self.select_id(id);
+                }
+                self.clamp_cursor();
+                self.message = Some("The file changed on disk; reloaded".into());
+            }
+            Err(e) => {
+                self.message = Some(format!("Cannot read {}: {e}", self.backlog.path.display()))
+            }
+        }
+    }
+
+    /// Drag the border between the list and the details with the left button.
+    pub fn handle_mouse(&mut self, m: MouseEvent) {
+        if !matches!(self.mode, Mode::List | Mode::Search(_)) {
+            return;
+        }
+        let b = self.body;
+        let wide = b.width >= WIDE;
+        // `pos` runs along the split direction, `across` along the border.
+        let (pos, start, total, across, lo, len) = if wide {
+            (m.column, b.x, b.width, m.row, b.y, b.height)
+        } else {
+            (m.row, b.y, b.height, m.column, b.x, b.width)
+        };
+        // The border is the last cell of the list and the first cell of the details.
+        let border = start + self.split_size(total);
+        match m.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.dragging = (border.saturating_sub(1)..=border).contains(&pos)
+                    && (lo..lo + len).contains(&across);
+            }
+            MouseEventKind::Drag(MouseButton::Left) if self.dragging && total > 0 => {
+                self.split =
+                    ((pos + 1).saturating_sub(start) as f32 / total as f32).clamp(0.0, 1.0);
+            }
+            MouseEventKind::Up(MouseButton::Left) => self.dragging = false,
+            _ => {}
         }
     }
 

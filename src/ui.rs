@@ -65,15 +65,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     .areas(f.area());
     f.render_widget(Block::new().style(Style::new().fg(FG).bg(BG)), f.area());
 
-    let (list_area, detail_area) = if body.width >= 90 {
-        let [a, b] = Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)])
-            .areas(body);
-        (a, b)
-    } else {
-        let [a, b] =
-            Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(body);
-        (a, b)
-    };
+    let (list_area, detail_area) = app.split_body(body);
     app.set_page_height(list_area.height.saturating_sub(2));
 
     draw_header(f, app, header);

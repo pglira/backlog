@@ -23,6 +23,7 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 pub const FILE_NAME: &str = ".backlog.md";
 const HEADER: &str = "# Backlog\n";
@@ -73,6 +74,13 @@ pub struct Backlog {
     pub path: PathBuf,
     preamble: String,
     pub issues: Vec<Issue>,
+    /// Modification time and size of the file at the last load or save.
+    stamp: Option<(SystemTime, u64)>,
+}
+
+fn stamp(path: &Path) -> Option<(SystemTime, u64)> {
+    let meta = fs::metadata(path).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
 }
 
 impl Backlog {
@@ -89,20 +97,30 @@ impl Backlog {
     }
 
     pub fn load(path: &Path) -> io::Result<Backlog> {
+        let stamp = stamp(path);
         let text = fs::read_to_string(path)?;
         let (preamble, issues) = parse(&text);
         Ok(Backlog {
             path: path.to_path_buf(),
             preamble,
             issues,
+            stamp,
         })
     }
 
+    /// Tell if another program changed the file since the last load or save.
+    /// A missing file counts as unchanged; the next save creates it again.
+    pub fn changed_on_disk(&self) -> bool {
+        stamp(&self.path).is_some_and(|s| Some(s) != self.stamp)
+    }
+
     /// Write the file atomically through a temporary sibling file.
-    pub fn save(&self) -> io::Result<()> {
+    pub fn save(&mut self) -> io::Result<()> {
         let tmp = self.path.with_extension("md.tmp");
         fs::write(&tmp, self.render())?;
-        fs::rename(&tmp, &self.path)
+        fs::rename(&tmp, &self.path)?;
+        self.stamp = stamp(&self.path);
+        Ok(())
     }
 
     pub fn next_id(&self) -> u32 {
@@ -227,6 +245,7 @@ mod tests {
             path: PathBuf::new(),
             preamble,
             issues,
+            stamp: None,
         };
         assert_eq!(b.render(), text);
         assert_eq!(b.next_id(), 5);

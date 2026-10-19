@@ -12,6 +12,8 @@ backlog FILE       # a specific file
 ```
 
 If the file does not exist, `backlog` asks to create it.
+When another program changes the file, `backlog` reads it again. Drag the
+border between the list and the details with the mouse to resize them.
 
 Each issue has an id, a title, a description, a "done when" condition,
 notes, and a status: `open`, `active`, `done` or `cancelled`. The file is

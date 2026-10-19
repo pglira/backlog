@@ -8,10 +8,13 @@ mod ui;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+use std::time::Duration;
 use std::{env, fs};
 
 use ratatui::DefaultTerminal;
-use ratatui::crossterm::event::{self, Event, KeyEventKind};
+use ratatui::crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind,
+};
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -67,7 +70,9 @@ fn run() -> io::Result<()> {
 
     let mut app = App::new(Backlog::load(&path)?);
     let mut terminal = ratatui::init();
+    let _ = execute!(io::stdout(), EnableMouseCapture);
     let result = event_loop(&mut terminal, &mut app);
+    let _ = execute!(io::stdout(), DisableMouseCapture);
     ratatui::restore();
     result
 }
@@ -83,8 +88,20 @@ fn ask(question: &str) -> io::Result<bool> {
 fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
     loop {
         terminal.draw(|f| ui::draw(f, app))?;
-        let Event::Key(key) = event::read()? else {
+        // Wait for input, and check the file for changes at each timeout.
+        if !event::poll(Duration::from_millis(500))? {
+            if app.backlog.changed_on_disk() {
+                app.reload();
+            }
             continue;
+        }
+        let key = match event::read()? {
+            Event::Key(key) => key,
+            Event::Mouse(m) => {
+                app.handle_mouse(m);
+                continue;
+            }
+            _ => continue,
         };
         if key.kind != KeyEventKind::Press {
             continue;
@@ -104,9 +121,9 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
 /// Leave the TUI, run `f` on the normal screen, and come back.
 fn suspended<T>(terminal: &mut DefaultTerminal, f: impl FnOnce() -> T) -> T {
     let _ = disable_raw_mode();
-    let _ = execute!(io::stdout(), LeaveAlternateScreen);
+    let _ = execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
     let result = f();
-    let _ = execute!(io::stdout(), EnterAlternateScreen);
+    let _ = execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture);
     let _ = enable_raw_mode();
     let _ = terminal.clear();
     result
