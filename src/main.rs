@@ -3,11 +3,12 @@
 mod app;
 mod backlog;
 mod input;
+mod textarea;
 mod ui;
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 use std::time::Duration;
 use std::{env, fs};
 
@@ -67,6 +68,7 @@ fn run() -> io::Result<()> {
         }
         Backlog::create(&path)?;
     }
+    let path = path.canonicalize().unwrap_or(path);
 
     let mut app = App::new(Backlog::load(&path)?);
     let mut terminal = ratatui::init();
@@ -114,6 +116,12 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
                 let result = result.map(|t| if single_line { join_lines(&t) } else { t });
                 app.editor_done(result);
             }
+            Effect::Copy(text) => {
+                app.message = Some(match copy_to_clipboard(&text) {
+                    Ok(()) => format!("Copied: {text}"),
+                    Err(e) => format!("Cannot copy: {e}"),
+                });
+            }
         }
     }
 }
@@ -156,6 +164,58 @@ fn run_editor(editor: &str, file: &Path) -> io::Result<()> {
     } else {
         Err(io::Error::other(format!("{editor} exited with {status}")))
     }
+}
+
+/// Copy `text` to the clipboard with the OSC 52 escape sequence, which most
+/// terminals support, also over SSH. Also give it to wl-copy, xclip or xsel
+/// when a display server is available.
+fn copy_to_clipboard(text: &str) -> io::Result<()> {
+    let mut out = io::stdout();
+    write!(out, "\x1b]52;c;{}\x07", base64(text.as_bytes()))?;
+    out.flush()?;
+
+    let tools: [(&str, &[&str], &str); 3] = [
+        ("wl-copy", &[], "WAYLAND_DISPLAY"),
+        ("xclip", &["-selection", "clipboard"], "DISPLAY"),
+        ("xsel", &["--clipboard", "--input"], "DISPLAY"),
+    ];
+    for (cmd, args, display) in tools {
+        if env::var_os(display).is_none() {
+            continue;
+        }
+        let Ok(mut child) = Command::new(cmd)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        else {
+            continue;
+        };
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(text.as_bytes())?;
+        }
+        child.wait()?;
+        break;
+    }
+    Ok(())
+}
+
+fn base64(data: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in data.chunks(3) {
+        let byte = |i: usize| *chunk.get(i).unwrap_or(&0) as u32;
+        let n = byte(0) << 16 | byte(1) << 8 | byte(2);
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(TABLE[(n >> (18 - 6 * i)) as usize & 63] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
 }
 
 fn join_lines(text: &str) -> String {

@@ -39,17 +39,29 @@ The timeout is set in `config/session.toml`.
 
 Press `?` for all keys.
 
-| List              |                              |
-|-------------------|------------------------------|
-| `j` `k` `g` `G`   | move                         |
-| `a`               | add                          |
-| `enter`           | edit                         |
-| `x` `s` `c`       | toggle done / active / cancelled |
-| `D`               | delete                       |
-| `/`               | search                       |
-| `q`               | quit                         |
+| List              |                                   |
+|-------------------|-----------------------------------|
+| `j` `k` `g` `G`   | move                              |
+| `a`               | add                               |
+| `enter`           | edit                              |
+| `x` `s` `C`       | toggle done / active / cancelled  |
+| `D`               | delete                            |
+| `c`               | copy an instruction for an agent  |
+| `p`               | show / hide the details           |
+| `/`               | search                            |
+| `q`               | quit                              |
 
-In the form, `i` edits a field inline with readline keys (`ctrl-a`,
-`ctrl-e`, `ctrl-w`, `ctrl-k`, `alt-b`, ...), `e` edits it in `$VISUAL`
-or `$EDITOR`, and `w` saves. While editing inline, `ctrl-x ctrl-e`
-continues in the editor. Multi-line fields always open in the editor.
+`c` copies a prompt such as `Work on issue #3 "..." from the backlog file
+/path/.backlog.md. ...` to the clipboard, with the OSC 52 escape sequence
+and with `wl-copy`, `xclip` or `xsel` when available.
+
+In the form, `i` edits a field inline and `e` edits it in `$VISUAL` or
+`$EDITOR`. `w` saves. Inline editing has Vim modes: it starts in insert
+mode, which also takes readline keys (`ctrl-a`, `ctrl-e`, `ctrl-w`,
+`ctrl-k`, `alt-b`, ...). `esc` goes to normal mode (`hjkl`, `w`, `b`,
+`dd`, `cw`, `p`, `u`, ...), and a second `esc` stops editing the field.
+`ctrl-x ctrl-e` continues in `$EDITOR`.
+
+The mouse selects an issue or a field with a click and edits it with a
+double-click. The wheel moves the cursor. A click in the field in edit
+moves the text cursor.

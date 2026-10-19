@@ -1,7 +1,7 @@
 //! Rendering.
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout, Position, Rect};
+use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, ListState, Paragraph, Wrap};
@@ -9,6 +9,7 @@ use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, ListState, Para
 use crate::app::{App, FIELD_NAMES, Form, Mode};
 use crate::backlog::{Issue, Status};
 use crate::input::LineEdit;
+use crate::textarea::{TextArea, VimMode};
 
 // Dracula palette, https://draculatheme.com/contribute
 const BG: Color = Color::Rgb(0x28, 0x2a, 0x36);
@@ -69,8 +70,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     app.set_page_height(list_area.height.saturating_sub(2));
 
     draw_header(f, app, header);
-    draw_list(f, app, list_area);
-    draw_detail(f, app.selected(), detail_area);
+    app.list_offset = draw_list(f, app, list_area);
+    if app.show_details {
+        draw_detail(f, app.selected(), detail_area);
+    }
     draw_footer(f, app, footer);
 
     match &app.mode {
@@ -106,7 +109,8 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Line::from(spans), area);
 }
 
-fn draw_list(f: &mut Frame, app: &App, area: Rect) {
+/// Draw the issue list and return the index of its first visible row.
+fn draw_list(f: &mut Frame, app: &App, area: Rect) -> usize {
     let vis = app.visible();
     let width = app
         .backlog
@@ -171,14 +175,17 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
                 .block(b),
             area,
         );
-        return;
+        return 0;
     }
     let list = List::new(items)
         .block(b)
         .highlight_style(Style::new().bg(CURRENT).add_modifier(Modifier::BOLD))
         .highlight_symbol("▌");
-    let mut state = ListState::default().with_selected(Some(app.cursor));
+    let mut state = ListState::default()
+        .with_selected(Some(app.cursor))
+        .with_offset(app.list_offset);
     f.render_stateful_widget(list, area, &mut state);
+    state.offset()
 }
 
 fn section<'a>(name: &'a str, body: &'a str) -> Vec<Line<'a>> {
@@ -245,11 +252,32 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         Mode::Form(form) if form.confirm_discard => {
             hints(&[("y", "discard changes"), ("any key", "go back")])
         }
+        Mode::Form(form)
+            if form
+                .edit
+                .as_ref()
+                .is_some_and(|e| e.mode == VimMode::Insert) =>
+        {
+            let enter = if form.sel == 0 {
+                "next field"
+            } else {
+                "new line"
+            };
+            hints(&[
+                ("esc", "normal mode"),
+                ("enter", enter),
+                ("ctrl-x ctrl-e", "$EDITOR"),
+                ("ctrl-c", "discard"),
+            ])
+        }
         Mode::Form(form) if form.edit.is_some() => hints(&[
-            ("enter", "next field"),
+            ("i a o", "insert"),
+            ("h j k l w b", "move"),
+            ("x dd", "delete"),
+            ("p", "paste"),
+            ("u", "undo"),
             ("esc", "done"),
-            ("ctrl-c", "undo"),
-            ("ctrl-x ctrl-e", "$EDITOR"),
+            ("ctrl-c", "discard"),
         ]),
         Mode::Form(_) => hints(&[
             ("j/k", "field"),
@@ -266,7 +294,9 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             ("enter", "edit"),
             ("x", "done"),
             ("s", "active"),
-            ("c", "cancel"),
+            ("C", "cancel"),
+            ("c", "copy"),
+            ("p", "details"),
             ("/", "search"),
             ("?", "help"),
             ("q", "quit"),
@@ -293,29 +323,43 @@ fn popup(area: Rect, width: u16, height: u16) -> Rect {
     )
 }
 
-fn draw_form(f: &mut Frame, form: &Form, area: Rect) {
-    let area = popup(
-        area,
-        90.max(area.width * 4 / 5),
-        24.max(area.height * 4 / 5),
-    );
-    f.render_widget(Clear, area);
-    let title = match form.id {
-        Some(id) => format!("Edit #{id}"),
-        None => "New issue".to_string(),
-    };
-    let outer = block(&title, true);
-    let inner = outer.inner(area);
-    f.render_widget(outer, area);
+fn form_area(body: Rect) -> Rect {
+    popup(
+        body,
+        90.max(body.width * 4 / 5),
+        24.max(body.height * 4 / 5),
+    )
+}
 
-    let rows = Layout::vertical([
+/// The areas of the form fields, with their borders, for the main area `body`.
+pub fn form_fields(body: Rect) -> [Rect; 4] {
+    Layout::vertical([
         Constraint::Length(3),
         Constraint::Fill(1),
         Constraint::Fill(1),
         Constraint::Fill(1),
     ])
-    .areas::<4>(inner);
-    for (n, rect) in rows.into_iter().enumerate() {
+    .areas(form_area(body).inner(Margin::new(1, 1)))
+}
+
+/// Draw a text editor and put the terminal cursor at its cursor.
+fn draw_text_area(f: &mut Frame, edit: &TextArea, area: Rect) {
+    let (rows, (x, y)) = edit.view(area.width as usize, area.height as usize);
+    let lines: Vec<Line> = rows.into_iter().map(Line::raw).collect();
+    f.render_widget(Paragraph::new(lines), area);
+    f.set_cursor_position(Position::new(area.x + x as u16, area.y + y as u16));
+}
+
+fn draw_form(f: &mut Frame, form: &Form, body: Rect) {
+    let area = form_area(body);
+    f.render_widget(Clear, area);
+    let title = match form.id {
+        Some(id) => format!("Edit #{id}"),
+        None => "New issue".to_string(),
+    };
+    f.render_widget(block(&title, true), area);
+
+    for (n, rect) in form_fields(body).into_iter().enumerate() {
         let selected = n == form.sel;
         let editing = selected && form.edit.is_some();
         let color = match (selected, editing) {
@@ -323,18 +367,25 @@ fn draw_form(f: &mut Frame, form: &Form, area: Rect) {
             (true, false) => ACCENT,
             _ => COMMENT,
         };
+        let mode = match &form.edit {
+            Some(edit) if editing => match edit.mode {
+                VimMode::Insert => " · INSERT",
+                VimMode::Normal => " · NORMAL",
+            },
+            _ => "",
+        };
         let b = Block::bordered()
             .border_type(BorderType::Rounded)
             .style(Style::new().fg(FG).bg(BG))
             .border_style(Style::new().fg(color))
             .title(Span::styled(
-                format!(" {} ", FIELD_NAMES[n]),
+                format!(" {}{mode} ", FIELD_NAMES[n]),
                 Style::new().fg(color).bold(),
             ));
         let content = b.inner(rect);
         f.render_widget(b, rect);
         match &form.edit {
-            Some(edit) if editing => draw_line_edit(f, edit, content),
+            Some(edit) if editing => draw_text_area(f, edit, content),
             _ if form.fields[n].is_empty() => f.render_widget(
                 Span::styled("empty", Style::new().fg(COMMENT).italic()),
                 content,
@@ -358,8 +409,25 @@ fn draw_confirm(f: &mut Frame, question: &str, area: Rect) {
     f.render_widget(Paragraph::new(text).centered().block(b), area);
 }
 
+type KeyHelp = &'static [(&'static str, &'static [(&'static str, &'static str)])];
+
+fn help_lines(sections: KeyHelp) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    for (name, keys) in sections {
+        lines.push(Line::styled(*name, Style::new().fg(PINK).bold()));
+        for (k, what) in *keys {
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {k:<16}"), Style::new().bold()),
+                Span::raw(*what),
+            ]));
+        }
+        lines.push(Line::raw(""));
+    }
+    lines
+}
+
 fn draw_help(f: &mut Frame, area: Rect) {
-    const KEYS: &[(&str, &[(&str, &str)])] = &[
+    const LEFT: KeyHelp = &[
         (
             "List",
             &[
@@ -370,10 +438,21 @@ fn draw_help(f: &mut Frame, area: Rect) {
                 ("enter e l", "edit issue"),
                 ("x", "toggle done"),
                 ("s", "toggle active"),
-                ("c", "toggle cancelled"),
+                ("C", "toggle cancelled"),
                 ("D", "delete issue"),
+                ("c", "copy an instruction for an agent"),
+                ("p", "show / hide details"),
                 ("/ esc", "search / clear search"),
                 ("q", "quit"),
+            ],
+        ),
+        (
+            "Mouse",
+            &[
+                ("click", "select issue or field"),
+                ("double-click", "edit issue or field"),
+                ("wheel", "move down / up"),
+                ("drag border", "resize list and details"),
             ],
         ),
         (
@@ -387,36 +466,51 @@ fn draw_help(f: &mut Frame, area: Rect) {
                 ("esc q", "cancel"),
             ],
         ),
+    ];
+    const RIGHT: KeyHelp = &[
         (
-            "Inline editing",
+            "Field: insert mode",
             &[
+                ("esc", "normal mode"),
+                ("enter", "new line (title: next field)"),
                 ("ctrl-a ctrl-e", "start / end of line"),
                 ("ctrl-b ctrl-f", "character left / right"),
                 ("alt-b alt-f", "word left / right"),
                 ("ctrl-w alt-d", "cut word before / after"),
                 ("ctrl-u ctrl-k", "cut to start / end"),
                 ("ctrl-y", "paste cut text"),
+            ],
+        ),
+        (
+            "Field: normal mode",
+            &[
+                ("h j k l w b e", "move"),
+                ("0 ^ $ gg G", "line start / end, first / last line"),
+                ("i a I A o O", "insert mode"),
+                ("x dd D dw d$", "delete"),
+                ("cw cc C s S", "change"),
+                ("yy yw p P", "copy / paste"),
+                ("J r<char>", "join lines / replace character"),
+                ("u ctrl-r", "undo / redo"),
+                ("esc", "stop editing the field"),
+            ],
+        ),
+        (
+            "Field: both modes",
+            &[
                 ("ctrl-x ctrl-e", "continue in $EDITOR"),
-                ("enter esc ctrl-c", "next field / done / undo"),
+                ("ctrl-c", "discard the changes"),
             ],
         ),
     ];
-    let mut lines = Vec::new();
-    for (name, keys) in KEYS {
-        lines.push(Line::styled(*name, Style::new().fg(PINK).bold()));
-        for (k, what) in *keys {
-            lines.push(Line::from(vec![
-                Span::styled(format!("  {k:<18}"), Style::new().bold()),
-                Span::raw(*what),
-            ]));
-        }
-        lines.push(Line::raw(""));
-    }
-    let height = lines.len() as u16 + 2;
-    let area = popup(area, 60, height);
+    let (left, right) = (help_lines(LEFT), help_lines(RIGHT));
+    let height = left.len().max(right.len()) as u16 + 2;
+    let area = popup(area, 104, height);
     f.render_widget(Clear, area);
-    f.render_widget(
-        Paragraph::new(lines).block(block("Keys · any key to close", true)),
-        area,
-    );
+    let outer = block("Keys · any key to close", true);
+    let inner = outer.inner(area);
+    f.render_widget(outer, area);
+    let [a, b] = Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)]).areas(inner);
+    f.render_widget(Paragraph::new(left), a);
+    f.render_widget(Paragraph::new(right), b);
 }

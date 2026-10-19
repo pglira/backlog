@@ -3,10 +3,13 @@
 use ratatui::crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
-use ratatui::layout::Rect;
+use ratatui::layout::{Margin, Position, Rect};
+use std::time::{Duration, Instant};
 
 use crate::backlog::{Backlog, Issue, Status};
 use crate::input::{LineEdit, Outcome};
+use crate::textarea::TextArea;
+use crate::ui;
 
 pub const FIELD_NAMES: [&str; 4] = ["Title", "Description", "Done when", "Notes"];
 const TITLE: usize = 0;
@@ -14,6 +17,8 @@ const TITLE: usize = 0;
 const WIDE: u16 = 90;
 /// Minimum size of a pane along the split direction.
 const MIN_PANE: u16 = 5;
+/// Maximum time between the two clicks of a double click.
+const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
 pub enum Mode {
     List,
@@ -29,7 +34,7 @@ pub struct Form {
     pub fields: [String; 4],
     orig: [String; 4],
     pub sel: usize,
-    pub edit: Option<LineEdit>,
+    pub edit: Option<TextArea>,
     pub confirm_discard: bool,
 }
 
@@ -38,17 +43,19 @@ impl Form {
         self.fields != self.orig
     }
 
-    /// Start inline editing of the selected field. A multi-line field opens
-    /// in the external editor, because the inline editor holds one line.
-    fn start_edit(&mut self, clear: bool) -> Effect {
+    /// Start inline editing of the selected field. The title holds one line.
+    fn start_edit(&mut self, clear: bool) {
         if clear {
             self.fields[self.sel].clear();
         }
-        if self.fields[self.sel].contains('\n') {
-            return self.external(self.fields[self.sel].clone());
+        self.edit = Some(TextArea::new(&self.fields[self.sel], self.sel == TITLE));
+    }
+
+    /// Stop inline editing and keep the text.
+    fn commit_edit(&mut self) {
+        if let Some(edit) = self.edit.take() {
+            self.fields[self.sel] = edit.text();
         }
-        self.edit = Some(LineEdit::new(&self.fields[self.sel]));
-        Effect::None
     }
 
     fn external(&self, text: String) -> Effect {
@@ -63,7 +70,12 @@ impl Form {
 pub enum Effect {
     None,
     Quit,
-    Editor { text: String, single_line: bool },
+    Editor {
+        text: String,
+        single_line: bool,
+    },
+    /// Copy the text to the clipboard.
+    Copy(String),
 }
 
 pub struct App {
@@ -76,9 +88,14 @@ pub struct App {
     page: usize,
     /// Fraction of the main area that the list takes.
     split: f32,
-    /// The main area of the last draw.
+    /// The main area and the list area of the last draw.
     body: Rect,
+    list_area: Rect,
+    /// The index of the first visible row of the list.
+    pub list_offset: usize,
+    pub show_details: bool,
     dragging: bool,
+    last_click: Option<(Instant, u16, u16)>,
 }
 
 impl App {
@@ -92,14 +109,28 @@ impl App {
             page: 10,
             split: 0.45,
             body: Rect::default(),
+            list_area: Rect::default(),
+            list_offset: 0,
+            show_details: true,
             dragging: false,
+            last_click: None,
         }
     }
 
     /// Split the main area into the list and the details: side by side when
-    /// it is wide enough, else one above the other.
+    /// it is wide enough, else one above the other. Without details, the list
+    /// takes the full area.
     pub fn split_body(&mut self, body: Rect) -> (Rect, Rect) {
         self.body = body;
+        let (list, details) = self.split_rects(body);
+        self.list_area = list;
+        (list, details)
+    }
+
+    fn split_rects(&self, body: Rect) -> (Rect, Rect) {
+        if !self.show_details {
+            return (body, Rect::default());
+        }
         let wide = body.width >= WIDE;
         let first = if wide {
             self.split_size(body.width)
@@ -157,10 +188,96 @@ impl App {
         }
     }
 
-    /// Drag the border between the list and the details with the left button.
     pub fn handle_mouse(&mut self, m: MouseEvent) {
-        if !matches!(self.mode, Mode::List | Mode::Search(_)) {
+        let double = self.double_click(m);
+        match self.mode {
+            Mode::List | Mode::Search(_) => self.list_mouse(m, double),
+            Mode::Form(_) => self.form_mouse(m, double),
+            Mode::Help if matches!(m.kind, MouseEventKind::Down(_)) => self.mode = Mode::List,
+            _ => {}
+        }
+    }
+
+    /// Tell if a left button press is the second click of a double click.
+    fn double_click(&mut self, m: MouseEvent) -> bool {
+        if m.kind != MouseEventKind::Down(MouseButton::Left) {
+            return false;
+        }
+        let now = Instant::now();
+        let double = self
+            .last_click
+            .is_some_and(|(t, col, row)| col == m.column && row == m.row && now - t < DOUBLE_CLICK);
+        self.last_click = if double {
+            None
+        } else {
+            Some((now, m.column, m.row))
+        };
+        double
+    }
+
+    /// Click to select an issue, double-click to edit it, scroll to move the
+    /// cursor, and drag the border between the list and the details.
+    fn list_mouse(&mut self, m: MouseEvent, double: bool) {
+        if self.drag_border(m) {
             return;
+        }
+        let pos = Position::new(m.column, m.row);
+        let rows = self.list_area.inner(Margin::new(1, 1));
+        match m.kind {
+            MouseEventKind::Down(MouseButton::Left) if rows.contains(pos) => {
+                let n = self.list_offset + (m.row - rows.y) as usize;
+                if n < self.visible().len() {
+                    self.cursor = n;
+                    if double {
+                        self.open_edit();
+                    }
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                self.cursor += 1;
+                self.clamp_cursor();
+            }
+            MouseEventKind::ScrollUp => self.cursor = self.cursor.saturating_sub(1),
+            _ => {}
+        }
+    }
+
+    /// Click a field to select it, double-click to edit it, and click into
+    /// the field in edit to move the cursor.
+    fn form_mouse(&mut self, m: MouseEvent, double: bool) {
+        let Mode::Form(form) = &mut self.mode else {
+            return;
+        };
+        if m.kind != MouseEventKind::Down(MouseButton::Left) || form.confirm_discard {
+            return;
+        }
+        let pos = Position::new(m.column, m.row);
+        let fields = ui::form_fields(self.body);
+        let Some(n) = fields.iter().position(|r| r.contains(pos)) else {
+            return;
+        };
+        let text = fields[n].inner(Margin::new(1, 1));
+        match form.edit.as_mut() {
+            Some(edit) if n == form.sel => {
+                if text.contains(pos) {
+                    edit.click((m.column - text.x) as usize, (m.row - text.y) as usize);
+                }
+            }
+            _ => {
+                form.commit_edit();
+                form.sel = n;
+                if double {
+                    form.start_edit(false);
+                }
+            }
+        }
+    }
+
+    /// Drag the border between the list and the details with the left button.
+    /// Return true when the event belongs to a drag.
+    fn drag_border(&mut self, m: MouseEvent) -> bool {
+        if !self.show_details {
+            return false;
         }
         let b = self.body;
         let wide = b.width >= WIDE;
@@ -181,9 +298,25 @@ impl App {
                 self.split =
                     ((pos + 1).saturating_sub(start) as f32 / total as f32).clamp(0.0, 1.0);
             }
-            MouseEventKind::Up(MouseButton::Left) => self.dragging = false,
+            MouseEventKind::Up(MouseButton::Left) => {
+                return std::mem::take(&mut self.dragging);
+            }
             _ => {}
         }
+        self.dragging
+    }
+
+    /// The instruction for a coding agent to work on the selected issue.
+    fn agent_instruction(&self) -> Option<String> {
+        let i = self.selected()?;
+        Some(format!(
+            "Work on issue #{} \"{}\" from the backlog file {}. \
+             Read the issue there first: its description says what to do, \
+             and its \"Done when\" section says when the work is complete.",
+            i.id,
+            i.title,
+            self.backlog.path.display()
+        ))
     }
 
     pub fn set_page_height(&mut self, rows: u16) {
@@ -293,7 +426,13 @@ impl App {
 
             KeyCode::Char('x') => self.toggle_status(Status::Done),
             KeyCode::Char('s') => self.toggle_status(Status::Active),
-            KeyCode::Char('c') => self.toggle_status(Status::Cancelled),
+            KeyCode::Char('C') => self.toggle_status(Status::Cancelled),
+            KeyCode::Char('c') => {
+                if let Some(text) = self.agent_instruction() {
+                    return Effect::Copy(text);
+                }
+            }
+            KeyCode::Char('p') => self.show_details = !self.show_details,
             KeyCode::Char('D') => {
                 if let Some(i) = self.selected() {
                     self.mode = Mode::ConfirmDelete(i.id);
@@ -376,17 +515,13 @@ impl App {
             match edit.handle(key) {
                 Outcome::Continue => {}
                 Outcome::Submit => {
-                    form.fields[form.sel] = edit.text();
-                    form.edit = None;
+                    form.commit_edit();
                     if form.sel + 1 < FIELD_NAMES.len() {
                         form.sel += 1;
-                        effect = form.start_edit(false);
+                        form.start_edit(false);
                     }
                 }
-                Outcome::Leave => {
-                    form.fields[form.sel] = edit.text();
-                    form.edit = None;
-                }
+                Outcome::Leave => form.commit_edit(),
                 Outcome::Abort => form.edit = None,
                 Outcome::External => {
                     let text = edit.text();
@@ -403,10 +538,8 @@ impl App {
                 KeyCode::Char('k') | KeyCode::Up | KeyCode::BackTab => {
                     form.sel = (form.sel + FIELD_NAMES.len() - 1) % FIELD_NAMES.len()
                 }
-                KeyCode::Char('i') | KeyCode::Char('a') | KeyCode::Enter => {
-                    effect = form.start_edit(false)
-                }
-                KeyCode::Char('c') | KeyCode::Char('S') => effect = form.start_edit(true),
+                KeyCode::Char('i') | KeyCode::Char('a') | KeyCode::Enter => form.start_edit(false),
+                KeyCode::Char('c') | KeyCode::Char('S') => form.start_edit(true),
                 KeyCode::Char('E') | KeyCode::Char('e') => {
                     effect = form.external(form.fields[form.sel].clone())
                 }
