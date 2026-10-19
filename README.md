@@ -41,17 +41,17 @@ Press `?` for all keys.
 
 | List              |                                   |
 |-------------------|-----------------------------------|
-| `j` `k` `g` `G`   | move                              |
-| `a`               | add                               |
+| `j` `k` `gg` `G`  | move                              |
+| `a` `o`           | add                               |
 | `enter`           | edit                              |
-| `x` `s` `C`       | toggle done / active / cancelled  |
-| `D`               | delete                            |
-| `c`               | copy an instruction for an agent  |
+| `x` `s` `c`       | toggle done / active / cancelled  |
+| `dd`              | delete                            |
+| `y`               | copy a prompt for an agent        |
 | `p`               | show / hide the details           |
 | `/`               | search                            |
 | `q`               | quit                              |
 
-`c` copies a prompt such as `Work on issue #3 "..." from the backlog file
+`y` copies a prompt such as `Work on issue #3 "..." from the backlog file
 /path/.backlog.md. ...` to the clipboard, with the OSC 52 escape sequence
 and with `wl-copy`, `xclip` or `xsel` when available.
 

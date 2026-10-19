@@ -1,6 +1,6 @@
 [package]
 name = "backlog"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 description = "A TUI to manage the issues in a .backlog.md file"
 license = "MIT"

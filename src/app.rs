@@ -96,6 +96,8 @@ pub struct App {
     pub show_details: bool,
     dragging: bool,
     last_click: Option<(Instant, u16, u16)>,
+    /// The first key of a two-key list command (`gg`, `dd`).
+    pending: Option<char>,
 }
 
 impl App {
@@ -114,6 +116,7 @@ impl App {
             show_details: true,
             dragging: false,
             last_click: None,
+            pending: None,
         }
     }
 
@@ -407,37 +410,41 @@ impl App {
     fn list_key(&mut self, key: KeyEvent) -> Effect {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let len = self.visible().len();
+        let pending = self.pending.take();
         match key.code {
+            KeyCode::Char('g') if pending == Some('g') => self.cursor = 0,
+            KeyCode::Char('d') if pending == Some('d') => {
+                if let Some(i) = self.selected() {
+                    self.mode = Mode::ConfirmDelete(i.id);
+                }
+            }
+            KeyCode::Char(c @ ('g' | 'd')) if !ctrl => self.pending = Some(c),
+
             KeyCode::Char('q') => return Effect::Quit,
             KeyCode::Char('c') if ctrl => return Effect::Quit,
             KeyCode::Char('?') => self.mode = Mode::Help,
 
             KeyCode::Char('j') | KeyCode::Down => self.cursor += 1,
             KeyCode::Char('k') | KeyCode::Up => self.cursor = self.cursor.saturating_sub(1),
-            KeyCode::Char('g') | KeyCode::Home => self.cursor = 0,
+            KeyCode::Home => self.cursor = 0,
             KeyCode::Char('G') | KeyCode::End => self.cursor = len,
             KeyCode::Char('d') if ctrl => self.cursor += self.page / 2,
             KeyCode::Char('u') if ctrl => self.cursor = self.cursor.saturating_sub(self.page / 2),
             KeyCode::PageDown => self.cursor += self.page,
             KeyCode::PageUp => self.cursor = self.cursor.saturating_sub(self.page),
 
-            KeyCode::Char('a') => self.open_new(),
+            KeyCode::Char('a') | KeyCode::Char('o') => self.open_new(),
             KeyCode::Enter | KeyCode::Char('e') | KeyCode::Char('l') => self.open_edit(),
 
             KeyCode::Char('x') => self.toggle_status(Status::Done),
             KeyCode::Char('s') => self.toggle_status(Status::Active),
-            KeyCode::Char('C') => self.toggle_status(Status::Cancelled),
-            KeyCode::Char('c') => {
+            KeyCode::Char('c') => self.toggle_status(Status::Cancelled),
+            KeyCode::Char('y') => {
                 if let Some(text) = self.agent_instruction() {
                     return Effect::Copy(text);
                 }
             }
             KeyCode::Char('p') => self.show_details = !self.show_details,
-            KeyCode::Char('D') => {
-                if let Some(i) = self.selected() {
-                    self.mode = Mode::ConfirmDelete(i.id);
-                }
-            }
 
             KeyCode::Char('/') => self.mode = Mode::Search(LineEdit::new(&self.query)),
             KeyCode::Esc => self.query.clear(),
