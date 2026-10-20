@@ -93,7 +93,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Mode::Help => draw_help(f, body),
         Mode::Prompt(edit) => draw_prompt(f, edit, body),
         Mode::Search(edit) => draw_search(f, edit, search),
-        Mode::List => {}
+        Mode::List | Mode::PromptExternal => {}
     }
     draw_notice(f, app, body);
 }
@@ -500,6 +500,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
                 ("dd", "delete issue"),
                 ("y", "copy a prompt for an agent"),
                 ("P", "edit the agent prompt"),
+                ("E", "edit the agent prompt in $EDITOR"),
                 ("p", "show / hide details"),
                 ("/ esc", "search / clear search"),
                 ("q", "quit"),
@@ -565,7 +566,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
     ];
     let (left, right) = (help_lines(LEFT), help_lines(RIGHT));
     let height = left.len().max(right.len()) as u16 + 2;
-    let area = popup(area, 104, height);
+    let area = popup(area, 108, height);
     f.render_widget(Clear, area);
     let outer = block("Keys · any key to close", true);
     let inner = outer.inner(area);

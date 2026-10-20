@@ -31,6 +31,8 @@ pub enum Mode {
     Help,
     /// Edit the template of the agent prompt.
     Prompt(TextArea),
+    /// Wait for the external editor with the template of the agent prompt.
+    PromptExternal,
 }
 
 /// The editor for one issue. `id` is `None` for a new issue.
@@ -345,13 +347,18 @@ impl App {
     /// The prompt for a coding agent to work on the selected issue.
     fn agent_instruction(&self) -> Option<String> {
         let i = self.selected()?;
-        let template = self.backlog.prompt.as_deref().unwrap_or(prompt::DEFAULT);
+        let template = self.template();
         let path = self.backlog.path.display().to_string();
         Some(prompt::fill(template, i.id, &i.title, &path))
     }
 
     /// Keep the edited prompt template in the backlog file. An empty
     /// template, or one equal to the default, removes it from the file.
+    /// The template of the agent prompt.
+    fn template(&self) -> &str {
+        self.backlog.prompt.as_deref().unwrap_or(prompt::DEFAULT)
+    }
+
     fn save_prompt(&mut self, text: &str) {
         let text = text.trim();
         self.backlog.prompt = if text.is_empty() || text == prompt::DEFAULT {
@@ -436,7 +443,7 @@ impl App {
                 }
                 Effect::None
             }
-            Mode::Help => Effect::None,
+            Mode::Help | Mode::PromptExternal => Effect::None,
             Mode::Prompt(mut edit) => match edit.handle(key) {
                 Outcome::Leave | Outcome::Submit => {
                     self.save_prompt(&edit.text());
@@ -459,9 +466,13 @@ impl App {
         }
     }
 
-    /// Put the text from the external editor into the selected form field,
-    /// or into the prompt editor.
+    /// Put the text from the external editor into the selected form field or
+    /// into the prompt editor, or save it as the agent prompt.
     pub fn editor_done(&mut self, result: std::io::Result<String>) {
+        let external = matches!(self.mode, Mode::PromptExternal);
+        if external {
+            self.mode = Mode::List;
+        }
         let text = match result {
             Ok(text) => text,
             Err(e) => {
@@ -469,6 +480,10 @@ impl App {
                 return;
             }
         };
+        if external {
+            self.save_prompt(&text);
+            return;
+        }
         match &mut self.mode {
             Mode::Form(form) => form.fields[form.sel] = text,
             Mode::Prompt(edit) => *edit = TextArea::new(&text, false),
@@ -514,9 +529,13 @@ impl App {
                 }
             }
             KeyCode::Char('p') => self.show_details = !self.show_details,
-            KeyCode::Char('P') => {
-                let template = self.backlog.prompt.as_deref().unwrap_or(prompt::DEFAULT);
-                self.mode = Mode::Prompt(TextArea::new(template, false));
+            KeyCode::Char('P') => self.mode = Mode::Prompt(TextArea::new(self.template(), false)),
+            KeyCode::Char('E') => {
+                self.mode = Mode::PromptExternal;
+                return Effect::Editor {
+                    text: self.template().to_string(),
+                    single_line: false,
+                };
             }
 
             KeyCode::Char('/') => self.mode = Mode::Search(LineEdit::new(&self.query)),

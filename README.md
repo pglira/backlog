@@ -45,18 +45,19 @@ The timeout is now 8 hours and comes from the configuration file.
 
 Press `?` for all keys.
 
-| List              |                                   |
-|-------------------|-----------------------------------|
-| `j` `k` `gg` `G`  | move                              |
-| `a` `o`           | add                               |
-| `enter`           | edit                              |
-| `x` `s` `c`       | toggle done / active / cancelled  |
-| `dd`              | delete                            |
-| `y`               | copy a prompt for an agent        |
-| `P`               | edit the agent prompt             |
-| `p`               | show / hide the details           |
-| `/`               | search                            |
-| `q`               | quit                              |
+| List              |                                    |
+|-------------------|------------------------------------|
+| `j` `k` `gg` `G`  | move                               |
+| `a` `o`           | add                                |
+| `enter`           | edit                               |
+| `x` `s` `c`       | toggle done / active / cancelled   |
+| `dd`              | delete                             |
+| `y`               | copy a prompt for an agent         |
+| `P`               | edit the agent prompt              |
+| `E`               | edit the agent prompt in `$EDITOR` |
+| `p`               | show / hide the details            |
+| `/`               | search                             |
+| `q`               | quit                               |
 
 `y` copies a prompt such as `Work on issue #3 "..." from the backlog file
 /path/.backlog.md. ...` to the clipboard. The prompt also asks the agent to
@@ -72,7 +73,8 @@ shows it as "(no title)" with the start of the description, and the prompt
 asks the agent to give it a short title (20 characters at most).
 
 `P` edits the prompt template in the same Vim editor as the fields; `esc`
-in normal mode saves it. `{id}`, `{title}` and `{path}` in the template are
+in normal mode saves it. `E` edits the template in `$VISUAL` or `$EDITOR`
+and saves it when the editor exits. `{id}`, `{title}` and `{path}` in the template are
 replaced by the values of the issue. An edited template is stored in the
 `## Agent prompt` section at the top of `.backlog.md`; an empty template, or
 one equal to the built-in default, removes the section.
