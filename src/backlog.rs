@@ -145,10 +145,10 @@ impl Backlog {
             out.push_str(&format!("\n{PROMPT_HEADING}\n{}\n", prompt.trim_end()));
         }
         for i in &self.issues {
+            let heading = format!("## #{} {}", i.id, i.title);
             out.push_str(&format!(
-                "\n## #{} {}\nstatus: {}\n",
-                i.id,
-                i.title,
+                "\n{}\nstatus: {}\n",
+                heading.trim_end(),
                 i.status.as_str()
             ));
             for (name, body) in [
@@ -285,6 +285,22 @@ fn parse(text: &str) -> (String, Vec<Issue>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn issue_without_title() {
+        let text = "# Backlog\n\n## #2\nstatus: open\n\n### Description\nDo it.\n";
+        let (preamble, issues) = parse(text);
+        assert_eq!(issues[0].id, 2);
+        assert_eq!(issues[0].title, "");
+        let b = Backlog {
+            path: PathBuf::new(),
+            preamble,
+            prompt: None,
+            issues,
+            stamp: None,
+        };
+        assert_eq!(b.render(), text);
+    }
 
     #[test]
     fn round_trip() {

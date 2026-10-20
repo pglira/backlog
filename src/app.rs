@@ -15,6 +15,7 @@ use crate::ui;
 
 pub const FIELD_NAMES: [&str; 5] = ["Title", "Description", "Done when", "Notes", "Outcome"];
 const TITLE: usize = 0;
+const DESCRIPTION: usize = 1;
 /// Minimum width of the main area for the list and the details side by side.
 const WIDE: u16 = 90;
 /// Minimum size of a pane along the split direction.
@@ -646,8 +647,10 @@ impl App {
         for f in &mut form.fields {
             *f = f.trim().to_string();
         }
-        if form.fields[TITLE].is_empty() {
-            self.message = Some("The title must not be empty".into());
+        // An issue without a title needs a description; the agent prompt asks
+        // for a title from the description.
+        if form.fields[TITLE].is_empty() && form.fields[DESCRIPTION].is_empty() {
+            self.message = Some("Enter a title or a description".into());
             form.sel = TITLE;
             self.mode = Mode::Form(form);
             return Effect::None;

@@ -147,7 +147,7 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) -> usize {
                     status_style(i.status),
                 ),
             ];
-            spans.extend(markdown::inline(&i.title, title));
+            spans.extend(title_spans(i, title));
             ListItem::new(Line::from(spans))
         })
         .collect();
@@ -197,6 +197,24 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) -> usize {
     state.offset()
 }
 
+/// The title of an issue as rendered Markdown. An issue without a title
+/// shows "(no title)" and the start of its description.
+fn title_spans(i: &Issue, style: Style) -> Vec<Span<'static>> {
+    if !i.title.is_empty() {
+        return markdown::inline(&i.title, style);
+    }
+    let first = i.description.lines().next().unwrap_or("");
+    let mut start: String = first.chars().take(60).collect();
+    if first.chars().count() > 60 {
+        start.push('…');
+    }
+    let dim = Style::new().fg(COMMENT).italic();
+    vec![
+        Span::styled("(no title) ", dim.bold()),
+        Span::styled(start, dim),
+    ]
+}
+
 fn section(name: &'static str, body: &str) -> Vec<Line<'static>> {
     let mut lines = vec![Line::styled(name, Style::new().fg(PINK).bold())];
     if body.trim().is_empty() {
@@ -214,7 +232,7 @@ fn draw_detail(f: &mut Frame, issue: Option<&Issue>, area: Rect) {
         return;
     };
     let mut lines = vec![
-        Line::from(markdown::inline(&i.title, Style::new().bold())),
+        Line::from(title_spans(i, Style::new().bold())),
         Line::styled(
             format!("{} {}", status_symbol(i.status), i.status.as_str()),
             status_style(i.status),

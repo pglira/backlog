@@ -67,6 +67,10 @@ Markdown in ASD-STE100 Simplified Technical English. The prompt is
 copied with the OSC 52 escape sequence and with `wl-copy`, `xclip` or
 `xsel` when available.
 
+An issue can have no title, but then it needs a description. The list
+shows it as "(no title)" with the start of the description, and the prompt
+asks the agent to give it a short title (20 characters at most).
+
 `P` edits the prompt template in the same Vim editor as the fields; `esc`
 in normal mode saves it. `{id}`, `{title}` and `{path}` in the template are
 replaced by the values of the issue. An edited template is stored in the

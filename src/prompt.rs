@@ -8,6 +8,8 @@ pub const DEFAULT: &str = "Work on issue #{id} \"{title}\" from the backlog file
 Read the issue there first: its description says what to do, \
 and its \"Done when\" section (if present) says when the work is complete. \
 Before you start, set the status line of the issue to \"status: active\". \
+If the issue has no title, also give it a short title (20 characters at most) \
+from its description, in the heading line \"## #{id} <title>\". \
 Never set the status to \"done\" without an explicit request from me. \
 When I ask you to set it to \"done\", also write a short summary of the work \
 in the \"### Outcome\" section of the issue; do not write the Outcome before that. \
@@ -15,8 +17,14 @@ Write the Outcome as well-structured Markdown in ASD-STE100 Simplified Technical
 short bullet lists with **bold** labels, `code` for file names, commands and identifiers, \
 and no long prose paragraphs.";
 
-/// Replace the placeholders in `template` with the values of an issue.
+/// Replace the placeholders in `template` with the values of an issue. An
+/// empty title becomes "(no title)".
 pub fn fill(template: &str, id: u32, title: &str, path: &str) -> String {
+    let title = if title.is_empty() {
+        "(no title)"
+    } else {
+        title
+    };
     template
         .replace("{id}", &id.to_string())
         .replace("{title}", title)
