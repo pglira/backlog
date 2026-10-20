@@ -11,7 +11,7 @@ use crate::input::{LineEdit, Outcome};
 use crate::textarea::TextArea;
 use crate::ui;
 
-pub const FIELD_NAMES: [&str; 4] = ["Title", "Description", "Done when", "Notes"];
+pub const FIELD_NAMES: [&str; 5] = ["Title", "Description", "Done when", "Notes", "Outcome"];
 const TITLE: usize = 0;
 /// Minimum width of the main area for the list and the details side by side.
 const WIDE: u16 = 90;
@@ -31,8 +31,8 @@ pub enum Mode {
 /// The editor for one issue. `id` is `None` for a new issue.
 pub struct Form {
     pub id: Option<u32>,
-    pub fields: [String; 4],
-    orig: [String; 4],
+    pub fields: [String; 5],
+    orig: [String; 5],
     pub sel: usize,
     pub edit: Option<TextArea>,
     pub confirm_discard: bool,
@@ -315,7 +315,9 @@ impl App {
         Some(format!(
             "Work on issue #{} \"{}\" from the backlog file {}. \
              Read the issue there first: its description says what to do, \
-             and its \"Done when\" section says when the work is complete.",
+             and its \"Done when\" section says when the work is complete. \
+             When you finish, write a short summary of the work in the \
+             \"### Outcome\" section of the issue.",
             i.id,
             i.title,
             self.backlog.path.display()
@@ -335,7 +337,7 @@ impl App {
             .enumerate()
             .filter(|(_, i)| {
                 query.is_empty()
-                    || [&i.title, &i.description, &i.done_when, &i.notes]
+                    || [&i.title, &i.description, &i.done_when, &i.notes, &i.outcome]
                         .iter()
                         .any(|s| s.to_lowercase().contains(&query))
             })
@@ -499,6 +501,7 @@ impl App {
             i.description.clone(),
             i.done_when.clone(),
             i.notes.clone(),
+            i.outcome.clone(),
         ];
         self.mode = Mode::Form(Box::new(Form {
             id: Some(i.id),
@@ -575,7 +578,7 @@ impl App {
             self.mode = Mode::Form(form);
             return Effect::None;
         }
-        let [title, description, done_when, notes] = form.fields;
+        let [title, description, done_when, notes, outcome] = form.fields;
         let id = match form.id {
             Some(id) => {
                 if let Some(i) = self.backlog.issues.iter_mut().find(|i| i.id == id) {
@@ -584,6 +587,7 @@ impl App {
                         description,
                         done_when,
                         notes,
+                        outcome,
                         ..i.clone()
                     };
                 }
@@ -598,6 +602,7 @@ impl App {
                     description,
                     done_when,
                     notes,
+                    outcome,
                     status: Status::Open,
                 };
                 self.backlog.issues.push(issue);

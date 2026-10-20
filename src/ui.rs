@@ -215,6 +215,7 @@ fn draw_detail(f: &mut Frame, issue: Option<&Issue>, area: Rect) {
     lines.extend(section("Description", &i.description));
     lines.extend(section("Done when", &i.done_when));
     lines.extend(section("Notes", &i.notes));
+    lines.extend(section("Outcome", &i.outcome));
     let p = Paragraph::new(Text::from(lines))
         .wrap(Wrap { trim: false })
         .block(block(&format!("#{}", i.id), false));
@@ -328,15 +329,18 @@ fn form_area(body: Rect) -> Rect {
     popup(
         body,
         90.max(body.width * 4 / 5),
-        24.max(body.height * 4 / 5),
+        32.max(body.height * 4 / 5),
     )
 }
 
-/// The areas of the form fields, with their borders, for the main area `body`.
-pub fn form_fields(body: Rect) -> [Rect; 4] {
+/// The areas of the form fields, with their borders, for the main area `body`:
+/// one text row for the title, eight for the description, two for the "done
+/// when" condition, and the rest shared by the notes and the outcome.
+pub fn form_fields(body: Rect) -> [Rect; 5] {
     Layout::vertical([
         Constraint::Length(3),
-        Constraint::Fill(1),
+        Constraint::Length(10),
+        Constraint::Length(4),
         Constraint::Fill(1),
         Constraint::Fill(1),
     ])

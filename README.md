@@ -16,8 +16,9 @@ When another program changes the file, `backlog` reads it again. Drag the
 border between the list and the details with the mouse to resize them.
 
 Each issue has an id, a title, a description, a "done when" condition,
-notes, and a status: `open`, `active`, `done` or `cancelled`. The file is
-plain Markdown and is written after each change:
+notes, an outcome (a short summary of the work), and a status: `open`,
+`active`, `done` or `cancelled`. The file is plain Markdown and is written
+after each change:
 
 ```markdown
 # Backlog
@@ -33,6 +34,9 @@ A user stays logged in for 8 hours.
 
 ### Notes
 The timeout is set in `config/session.toml`.
+
+### Outcome
+The timeout is now 8 hours and comes from the configuration file.
 ```
 
 ## Keys
@@ -52,8 +56,10 @@ Press `?` for all keys.
 | `q`               | quit                              |
 
 `y` copies a prompt such as `Work on issue #3 "..." from the backlog file
-/path/.backlog.md. ...` to the clipboard, with the OSC 52 escape sequence
-and with `wl-copy`, `xclip` or `xsel` when available.
+/path/.backlog.md. ...` to the clipboard. The prompt also asks the agent to
+write a short summary of its work in the Outcome section. The prompt is
+copied with the OSC 52 escape sequence and with `wl-copy`, `xclip` or
+`xsel` when available.
 
 In the form, `i` edits a field inline and `e` edits it in `$VISUAL` or
 `$EDITOR`. `w` saves. Inline editing has Vim modes: it starts in insert

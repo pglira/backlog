@@ -16,6 +16,9 @@
 //!
 //! ### Notes
 //! Free text.
+//!
+//! ### Outcome
+//! Free text.
 //! ```
 //!
 //! Text before the first issue is kept verbatim. New issues go to the end.
@@ -68,6 +71,7 @@ pub struct Issue {
     pub description: String,
     pub done_when: String,
     pub notes: String,
+    pub outcome: String,
 }
 
 pub struct Backlog {
@@ -141,6 +145,7 @@ impl Backlog {
                 ("Description", &i.description),
                 ("Done when", &i.done_when),
                 ("Notes", &i.notes),
+                ("Outcome", &i.outcome),
             ] {
                 if !body.trim().is_empty() {
                     out.push_str(&format!("\n### {}\n{}\n", name, body.trim_end()));
@@ -164,6 +169,7 @@ fn parse(text: &str) -> (String, Vec<Issue>) {
         Description,
         DoneWhen,
         Notes,
+        Outcome,
     }
 
     let mut preamble = String::new();
@@ -179,6 +185,7 @@ fn parse(text: &str) -> (String, Vec<Issue>) {
                 description: String::new(),
                 done_when: String::new(),
                 notes: String::new(),
+                outcome: String::new(),
             });
             section = Section::None;
             continue;
@@ -193,6 +200,7 @@ fn parse(text: &str) -> (String, Vec<Issue>) {
                 "description" => Section::Description,
                 "done when" => Section::DoneWhen,
                 "notes" => Section::Notes,
+                "outcome" => Section::Outcome,
                 _ => Section::None,
             };
             continue;
@@ -201,6 +209,7 @@ fn parse(text: &str) -> (String, Vec<Issue>) {
             Section::Description => &mut issue.description,
             Section::DoneWhen => &mut issue.done_when,
             Section::Notes => &mut issue.notes,
+            Section::Outcome => &mut issue.outcome,
             Section::None => {
                 if let Some(s) = line.strip_prefix("status:") {
                     issue.status = Status::parse(s);
@@ -217,6 +226,7 @@ fn parse(text: &str) -> (String, Vec<Issue>) {
             &mut issue.description,
             &mut issue.done_when,
             &mut issue.notes,
+            &mut issue.outcome,
         ] {
             *body = body.trim_matches('\n').to_string();
         }
@@ -233,13 +243,14 @@ mod tests {
 
     #[test]
     fn round_trip() {
-        let text = "# Backlog\n\nNotes.\n\n## #1 First\nstatus: done\n\n### Description\nline 1\n\nline 2\n\n### Done when\nit works\n\n### Notes\nsee #4\n\n## #4 Second\nstatus: open\n";
+        let text = "# Backlog\n\nNotes.\n\n## #1 First\nstatus: done\n\n### Description\nline 1\n\nline 2\n\n### Done when\nit works\n\n### Notes\nsee #4\n\n### Outcome\nfixed\n\n## #4 Second\nstatus: open\n";
         let (preamble, issues) = parse(text);
         assert_eq!(issues.len(), 2);
         assert_eq!(issues[0].status, Status::Done);
         assert_eq!(issues[0].description, "line 1\n\nline 2");
         assert_eq!(issues[0].done_when, "it works");
         assert_eq!(issues[0].notes, "see #4");
+        assert_eq!(issues[0].outcome, "fixed");
         assert_eq!(issues[1].id, 4);
         let b = Backlog {
             path: PathBuf::new(),
