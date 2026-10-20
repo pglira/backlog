@@ -84,6 +84,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Mode::Form(form) => draw_form(f, form, body),
         Mode::ConfirmDelete(id) => draw_confirm(f, &format!("Delete #{id} permanently?"), body),
         Mode::Help => draw_help(f, body),
+        Mode::Prompt(edit) => draw_prompt(f, edit, body),
         Mode::List | Mode::Search(_) => {}
     }
 }
@@ -294,6 +295,18 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             ("esc", "cancel"),
         ]),
         Mode::ConfirmDelete(_) => hints(&[("y", "delete"), ("any key", "keep")]),
+        Mode::Prompt(edit) if edit.mode == VimMode::Insert => hints(&[
+            ("esc", "normal mode"),
+            ("ctrl-x ctrl-e", "$EDITOR"),
+            ("ctrl-c", "discard"),
+        ]),
+        Mode::Prompt(_) => hints(&[
+            ("i a o", "insert"),
+            ("dd", "delete line"),
+            ("u", "undo"),
+            ("esc", "save"),
+            ("ctrl-c", "discard"),
+        ]),
         _ => hints(&[
             ("j/k", "move"),
             ("a", "add"),
@@ -303,6 +316,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             ("c", "cancel"),
             ("dd", "delete"),
             ("y", "copy prompt"),
+            ("P", "edit prompt"),
             ("p", "details"),
             ("/", "search"),
             ("?", "help"),
@@ -413,6 +427,29 @@ fn draw_form(f: &mut Frame, form: &Form, body: Rect) {
     }
 }
 
+pub fn prompt_area(body: Rect) -> Rect {
+    popup(body, 90.max(body.width * 4 / 5), 14)
+}
+
+fn draw_prompt(f: &mut Frame, edit: &TextArea, body: Rect) {
+    let area = prompt_area(body);
+    f.render_widget(Clear, area);
+    let mode = match edit.mode {
+        VimMode::Insert => "INSERT",
+        VimMode::Normal => "NORMAL",
+    };
+    let b = block(&format!("Agent prompt · {mode}"), true)
+        .border_style(Style::new().fg(EDITING))
+        .title_bottom(
+            Line::from(" {id} {title} {path} are replaced · empty: default ")
+                .right_aligned()
+                .fg(COMMENT),
+        );
+    let inner = b.inner(area);
+    f.render_widget(b, area);
+    draw_text_area(f, edit, inner);
+}
+
 fn draw_confirm(f: &mut Frame, question: &str, area: Rect) {
     let area = popup(area, question.len() as u16 + 8, 4);
     f.render_widget(Clear, area);
@@ -456,6 +493,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
                 ("c", "toggle cancelled"),
                 ("dd", "delete issue"),
                 ("y", "copy a prompt for an agent"),
+                ("P", "edit the agent prompt"),
                 ("p", "show / hide details"),
                 ("/ esc", "search / clear search"),
                 ("q", "quit"),

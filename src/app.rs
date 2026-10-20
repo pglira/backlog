@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use crate::backlog::{Backlog, Issue, Status};
 use crate::input::{LineEdit, Outcome};
+use crate::prompt;
 use crate::textarea::TextArea;
 use crate::ui;
 
@@ -26,6 +27,8 @@ pub enum Mode {
     Form(Box<Form>),
     ConfirmDelete(u32),
     Help,
+    /// Edit the template of the agent prompt.
+    Prompt(TextArea),
 }
 
 /// The editor for one issue. `id` is `None` for a new issue.
@@ -197,6 +200,12 @@ impl App {
             Mode::List | Mode::Search(_) => self.list_mouse(m, double),
             Mode::Form(_) => self.form_mouse(m, double),
             Mode::Help if matches!(m.kind, MouseEventKind::Down(_)) => self.mode = Mode::List,
+            Mode::Prompt(ref mut edit) if m.kind == MouseEventKind::Down(MouseButton::Left) => {
+                let text = ui::prompt_area(self.body).inner(Margin::new(1, 1));
+                if text.contains(Position::new(m.column, m.row)) {
+                    edit.click((m.column - text.x) as usize, (m.row - text.y) as usize);
+                }
+            }
             _ => {}
         }
     }
@@ -309,21 +318,28 @@ impl App {
         self.dragging
     }
 
-    /// The instruction for a coding agent to work on the selected issue.
+    /// The prompt for a coding agent to work on the selected issue.
     fn agent_instruction(&self) -> Option<String> {
         let i = self.selected()?;
-        Some(format!(
-            "Work on issue #{} \"{}\" from the backlog file {}. \
-             Read the issue there first: its description says what to do, \
-             and its \"Done when\" section says when the work is complete. \
-             Before you start, set the status line of the issue to \"status: active\". \
-             Never set the status to \"done\": I do that after I check the work. \
-             When you finish, write a short summary of the work in the \
-             \"### Outcome\" section of the issue.",
-            i.id,
-            i.title,
-            self.backlog.path.display()
-        ))
+        let template = self.backlog.prompt.as_deref().unwrap_or(prompt::DEFAULT);
+        let path = self.backlog.path.display().to_string();
+        Some(prompt::fill(template, i.id, &i.title, &path))
+    }
+
+    /// Keep the edited prompt template in the backlog file. An empty
+    /// template, or one equal to the default, removes it from the file.
+    fn save_prompt(&mut self, text: &str) {
+        let text = text.trim();
+        self.backlog.prompt = if text.is_empty() || text == prompt::DEFAULT {
+            None
+        } else {
+            Some(text.to_string())
+        };
+        self.message = Some(match self.backlog.prompt {
+            Some(_) => "Saved the agent prompt".into(),
+            None => "The agent prompt is the default".into(),
+        });
+        self.save();
     }
 
     pub fn set_page_height(&mut self, rows: u16) {
@@ -397,17 +413,42 @@ impl App {
                 Effect::None
             }
             Mode::Help => Effect::None,
+            Mode::Prompt(mut edit) => match edit.handle(key) {
+                Outcome::Leave | Outcome::Submit => {
+                    self.save_prompt(&edit.text());
+                    Effect::None
+                }
+                Outcome::Abort => Effect::None,
+                Outcome::Continue => {
+                    self.mode = Mode::Prompt(edit);
+                    Effect::None
+                }
+                Outcome::External => {
+                    let text = edit.text();
+                    self.mode = Mode::Prompt(edit);
+                    Effect::Editor {
+                        text,
+                        single_line: false,
+                    }
+                }
+            },
         }
     }
 
-    /// Put the text from the external editor into the selected form field.
+    /// Put the text from the external editor into the selected form field,
+    /// or into the prompt editor.
     pub fn editor_done(&mut self, result: std::io::Result<String>) {
-        let Mode::Form(form) = &mut self.mode else {
-            return;
+        let text = match result {
+            Ok(text) => text,
+            Err(e) => {
+                self.message = Some(format!("Editor failed: {e}"));
+                return;
+            }
         };
-        match result {
-            Ok(text) => form.fields[form.sel] = text,
-            Err(e) => self.message = Some(format!("Editor failed: {e}")),
+        match &mut self.mode {
+            Mode::Form(form) => form.fields[form.sel] = text,
+            Mode::Prompt(edit) => *edit = TextArea::new(&text, false),
+            _ => {}
         }
     }
 
@@ -449,6 +490,10 @@ impl App {
                 }
             }
             KeyCode::Char('p') => self.show_details = !self.show_details,
+            KeyCode::Char('P') => {
+                let template = self.backlog.prompt.as_deref().unwrap_or(prompt::DEFAULT);
+                self.mode = Mode::Prompt(TextArea::new(template, false));
+            }
 
             KeyCode::Char('/') => self.mode = Mode::Search(LineEdit::new(&self.query)),
             KeyCode::Esc => self.query.clear(),

@@ -5,6 +5,9 @@
 //! ```markdown
 //! # Backlog
 //!
+//! ## Agent prompt
+//! Optional template of the prompt for a coding agent.
+//!
 //! ## #1 Title of the issue
 //! status: open
 //!
@@ -77,6 +80,8 @@ pub struct Issue {
 pub struct Backlog {
     pub path: PathBuf,
     preamble: String,
+    /// The template of the agent prompt, from the `## Agent prompt` section.
+    pub prompt: Option<String>,
     pub issues: Vec<Issue>,
     /// Modification time and size of the file at the last load or save.
     stamp: Option<(SystemTime, u64)>,
@@ -104,9 +109,11 @@ impl Backlog {
         let stamp = stamp(path);
         let text = fs::read_to_string(path)?;
         let (preamble, issues) = parse(&text);
+        let (preamble, prompt) = split_prompt(&preamble);
         Ok(Backlog {
             path: path.to_path_buf(),
             preamble,
+            prompt,
             issues,
             stamp,
         })
@@ -134,6 +141,9 @@ impl Backlog {
     fn render(&self) -> String {
         let mut out = self.preamble.trim_end().to_string();
         out.push('\n');
+        if let Some(prompt) = &self.prompt {
+            out.push_str(&format!("\n{PROMPT_HEADING}\n{}\n", prompt.trim_end()));
+        }
         for i in &self.issues {
             out.push_str(&format!(
                 "\n## #{} {}\nstatus: {}\n",
@@ -154,6 +164,36 @@ impl Backlog {
         }
         out
     }
+}
+
+const PROMPT_HEADING: &str = "## Agent prompt";
+
+/// Take the `## Agent prompt` section out of the text before the first issue.
+/// The section ends at the next heading.
+fn split_prompt(preamble: &str) -> (String, Option<String>) {
+    let mut rest = String::new();
+    let mut prompt: Option<String> = None;
+    let mut in_prompt = false;
+    for line in preamble.lines() {
+        if line.trim().eq_ignore_ascii_case(PROMPT_HEADING) {
+            in_prompt = true;
+            prompt.get_or_insert_with(String::new);
+            continue;
+        }
+        if line.starts_with('#') {
+            in_prompt = false;
+        }
+        let target = match (&mut prompt, in_prompt) {
+            (Some(p), true) => p,
+            _ => &mut rest,
+        };
+        target.push_str(line);
+        target.push('\n');
+    }
+    let prompt = prompt
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty());
+    (rest, prompt)
 }
 
 /// Parse an issue heading of the form `## #<id> <title>`.
@@ -248,8 +288,10 @@ mod tests {
 
     #[test]
     fn round_trip() {
-        let text = "# Backlog\n\nNotes.\n\n## #1 First\nstatus: done\n\n### Description\nline 1\n\nline 2\n\n### Done when\nit works\n\n### Notes\nsee #4\n\n### Outcome\n### Changes\n- fixed\n\n## #4 Second\nstatus: open\n";
+        let text = "# Backlog\n\nNotes.\n\n## Agent prompt\nDo #{id}.\n\n## #1 First\nstatus: done\n\n### Description\nline 1\n\nline 2\n\n### Done when\nit works\n\n### Notes\nsee #4\n\n### Outcome\n### Changes\n- fixed\n\n## #4 Second\nstatus: open\n";
         let (preamble, issues) = parse(text);
+        let (preamble, prompt) = split_prompt(&preamble);
+        assert_eq!(prompt.as_deref(), Some("Do #{id}."));
         assert_eq!(issues.len(), 2);
         assert_eq!(issues[0].status, Status::Done);
         assert_eq!(issues[0].description, "line 1\n\nline 2");
@@ -260,6 +302,7 @@ mod tests {
         let b = Backlog {
             path: PathBuf::new(),
             preamble,
+            prompt,
             issues,
             stamp: None,
         };

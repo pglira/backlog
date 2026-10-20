@@ -53,17 +53,24 @@ Press `?` for all keys.
 | `x` `s` `c`       | toggle done / active / cancelled  |
 | `dd`              | delete                            |
 | `y`               | copy a prompt for an agent        |
+| `P`               | edit the agent prompt             |
 | `p`               | show / hide the details           |
 | `/`               | search                            |
 | `q`               | quit                              |
 
 `y` copies a prompt such as `Work on issue #3 "..." from the backlog file
 /path/.backlog.md. ...` to the clipboard. The prompt also asks the agent to
-set the issue to `active` when it starts, never to set it to `done` (you do
-that after you check the work), and to write a short summary of its work in
-the Outcome section when it finishes. The prompt is
+set the issue to `active` when it starts, and never to set it to `done`
+without your explicit request. Only when you ask for `done` does the agent
+write a short summary of its work in the Outcome section. The prompt is
 copied with the OSC 52 escape sequence and with `wl-copy`, `xclip` or
 `xsel` when available.
+
+`P` edits the prompt template in the same Vim editor as the fields; `esc`
+in normal mode saves it. `{id}`, `{title}` and `{path}` in the template are
+replaced by the values of the issue. An edited template is stored in the
+`## Agent prompt` section at the top of `.backlog.md`; an empty template, or
+one equal to the built-in default, removes the section.
 
 In the form, `i` edits a field inline and `e` edits it in `$VISUAL` or
 `$EDITOR`. `w` saves. Inline editing has Vim modes: it starts in insert
