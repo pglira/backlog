@@ -34,9 +34,11 @@ pub struct TextArea {
     /// The first key of a two-key command (`dd`, `gg`, `r<char>`, ...).
     pending: Option<char>,
     ctrl_x: bool,
-    /// The wrap width and the first visible row of the last view.
+    /// The wrap width, the first visible row and the number of rows of the
+    /// last view.
     width: Cell<usize>,
     scroll: Cell<usize>,
+    total: Cell<usize>,
 }
 
 fn is_word(c: char) -> bool {
@@ -62,6 +64,7 @@ impl TextArea {
             ctrl_x: false,
             width: Cell::new(1),
             scroll: Cell::new(0),
+            total: Cell::new(0),
         }
     }
 
@@ -118,8 +121,19 @@ impl TextArea {
             scroll = cursor.1 + 1 - height;
         }
         self.scroll.set(scroll);
+        self.total.set(rows.len());
         let visible = rows.into_iter().skip(scroll).take(height).collect();
         (visible, (cursor.0, cursor.1 - scroll))
+    }
+
+    /// The number of rows and the first visible row of the last view.
+    pub fn scroll_info(&self) -> (usize, usize) {
+        (self.total.get(), self.scroll.get())
+    }
+
+    /// Move the cursor `dir` lines down (or up, when negative); the view follows.
+    pub fn scroll_by(&mut self, dir: isize) {
+        self.move_row(dir);
     }
 
     /// Move the cursor to the cell (`x`, `y`) of the last view.

@@ -4,6 +4,7 @@ use ratatui::crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::layout::{Margin, Position, Rect};
+use std::cell::Cell;
 use std::time::{Duration, Instant};
 
 use crate::backlog::{Backlog, Issue, Status};
@@ -39,9 +40,18 @@ pub struct Form {
     pub sel: usize,
     pub edit: Option<TextArea>,
     pub confirm_discard: bool,
+    /// The first visible row of each field that is not in edit. The draw
+    /// clamps it to the length of the text.
+    pub scroll: [Cell<u16>; 5],
 }
 
 impl Form {
+    /// Scroll the field `n` that is not in edit by `dir` rows.
+    fn scroll_field(&self, n: usize, dir: i32) {
+        let row = (self.scroll[n].get() as i32 + dir).max(0) as u16;
+        self.scroll[n].set(row);
+    }
+
     fn is_dirty(&self) -> bool {
         self.fields != self.orig
     }
@@ -260,7 +270,7 @@ impl App {
         let Mode::Form(form) = &mut self.mode else {
             return;
         };
-        if m.kind != MouseEventKind::Down(MouseButton::Left) || form.confirm_discard {
+        if form.confirm_discard {
             return;
         }
         let pos = Position::new(m.column, m.row);
@@ -268,6 +278,19 @@ impl App {
         let Some(n) = fields.iter().position(|r| r.contains(pos)) else {
             return;
         };
+        let dir = match m.kind {
+            MouseEventKind::ScrollDown => 1,
+            MouseEventKind::ScrollUp => -1,
+            MouseEventKind::Down(MouseButton::Left) => 0,
+            _ => return,
+        };
+        if dir != 0 {
+            match form.edit.as_mut() {
+                Some(edit) if n == form.sel => edit.scroll_by(dir as isize),
+                _ => form.scroll_field(n, dir),
+            }
+            return;
+        }
         let text = fields[n].inner(Margin::new(1, 1));
         match form.edit.as_mut() {
             Some(edit) if n == form.sel => {
@@ -538,6 +561,7 @@ impl App {
             sel: TITLE,
             edit: None,
             confirm_discard: false,
+            scroll: Default::default(),
         }));
     }
 
@@ -557,6 +581,7 @@ impl App {
             sel: TITLE,
             edit: None,
             confirm_discard: false,
+            scroll: Default::default(),
         }));
     }
 
@@ -597,6 +622,8 @@ impl App {
                 }
                 KeyCode::Char('i') | KeyCode::Char('a') | KeyCode::Enter => form.start_edit(false),
                 KeyCode::Char('c') | KeyCode::Char('S') => form.start_edit(true),
+                KeyCode::Char('e') if ctrl => form.scroll_field(form.sel, 1),
+                KeyCode::Char('y') if ctrl => form.scroll_field(form.sel, -1),
                 KeyCode::Char('E') | KeyCode::Char('e') => {
                     effect = form.external(form.fields[form.sel].clone())
                 }

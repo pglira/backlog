@@ -79,6 +79,10 @@ mode, which also takes readline keys (`ctrl-a`, `ctrl-e`, `ctrl-w`,
 `dd`, `cw`, `p`, `u`, ...), and a second `esc` stops editing the field.
 `ctrl-x ctrl-e` continues in `$EDITOR`.
 
+The form shows the outcome in its right half. A field with more text than
+space shows a scroll bar; the mouse wheel or `ctrl-e` / `ctrl-y` scroll it.
+
 The mouse selects an issue or a field with a click and edits it with a
-double-click. The wheel moves the cursor. A click in the field in edit
-moves the text cursor.
+double-click. The wheel moves the cursor in the list and scrolls the field
+under the pointer in the form. A click in the field in edit moves the text
+cursor.

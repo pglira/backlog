@@ -4,7 +4,10 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{
+    Block, BorderType, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
+    ScrollbarOrientation, ScrollbarState, Wrap,
+};
 
 use crate::app::{App, FIELD_NAMES, Form, Mode};
 use crate::backlog::{Issue, Status};
@@ -352,26 +355,53 @@ fn form_area(body: Rect) -> Rect {
     )
 }
 
-/// The areas of the form fields, with their borders, for the main area `body`:
-/// one text row for the title, eight for the description, two for the "done
-/// when" condition, and the rest shared by the notes and the outcome.
+/// The areas of the form fields, with their borders, for the main area `body`.
+/// The left half holds one text row for the title, 13 for the description,
+/// two for the "done when" condition, and the rest for the notes. The outcome
+/// takes the right half.
 pub fn form_fields(body: Rect) -> [Rect; 5] {
-    Layout::vertical([
+    let [left, outcome] = Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)])
+        .areas(form_area(body).inner(Margin::new(1, 1)));
+    let [title, description, done_when, notes] = Layout::vertical([
         Constraint::Length(3),
-        Constraint::Length(10),
+        Constraint::Length(15),
         Constraint::Length(4),
         Constraint::Fill(1),
-        Constraint::Fill(1),
     ])
-    .areas(form_area(body).inner(Margin::new(1, 1)))
+    .areas(left);
+    [title, description, done_when, notes, outcome]
 }
 
-/// Draw a text editor and put the terminal cursor at its cursor.
-fn draw_text_area(f: &mut Frame, edit: &TextArea, area: Rect) {
-    let (rows, (x, y)) = edit.view(area.width as usize, area.height as usize);
+/// Draw a vertical scroll bar on the right border of `area` when `total`
+/// rows do not fit into the `height` rows inside the border.
+fn draw_scrollbar(f: &mut Frame, area: Rect, total: usize, offset: usize, color: Color) {
+    let height = area.height.saturating_sub(2) as usize;
+    if total <= height {
+        return;
+    }
+    let mut state = ScrollbarState::new(total - height + 1)
+        .viewport_content_length(height)
+        .position(offset);
+    let bar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .begin_symbol(None)
+        .end_symbol(None)
+        .track_symbol(Some("│"))
+        .thumb_symbol("┃")
+        .track_style(Style::new().fg(COMMENT))
+        .thumb_style(Style::new().fg(color));
+    f.render_stateful_widget(bar, area.inner(Margin::new(0, 1)), &mut state);
+}
+
+/// Draw a text editor inside the border `area`, with a scroll bar, and put
+/// the terminal cursor at its cursor.
+fn draw_text_area(f: &mut Frame, edit: &TextArea, area: Rect, color: Color) {
+    let inner = area.inner(Margin::new(1, 1));
+    let (rows, (x, y)) = edit.view(inner.width as usize, inner.height as usize);
     let lines: Vec<Line> = rows.into_iter().map(Line::raw).collect();
-    f.render_widget(Paragraph::new(lines), area);
-    f.set_cursor_position(Position::new(area.x + x as u16, area.y + y as u16));
+    f.render_widget(Paragraph::new(lines), inner);
+    f.set_cursor_position(Position::new(inner.x + x as u16, inner.y + y as u16));
+    let (total, scroll) = edit.scroll_info();
+    draw_scrollbar(f, area, total, scroll, color);
 }
 
 fn draw_form(f: &mut Frame, form: &Form, body: Rect) {
@@ -409,7 +439,7 @@ fn draw_form(f: &mut Frame, form: &Form, body: Rect) {
         let content = b.inner(rect);
         f.render_widget(b, rect);
         match &form.edit {
-            Some(edit) if editing => draw_text_area(f, edit, content),
+            Some(edit) if editing => draw_text_area(f, edit, rect, color),
             _ if form.fields[n].is_empty() => f.render_widget(
                 Span::styled("empty", Style::new().fg(COMMENT).italic()),
                 content,
@@ -421,7 +451,13 @@ fn draw_form(f: &mut Frame, form: &Form, body: Rect) {
                 } else {
                     markdown::render(&form.fields[n], Style::new())
                 };
-                f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), content)
+                let p = Paragraph::new(lines).wrap(Wrap { trim: false });
+                let total = p.line_count(content.width);
+                let max = total.saturating_sub(content.height as usize) as u16;
+                let offset = form.scroll[n].get().min(max);
+                form.scroll[n].set(offset);
+                f.render_widget(p.scroll((offset, 0)), content);
+                draw_scrollbar(f, rect, total, offset as usize, color);
             }
         }
     }
@@ -445,9 +481,8 @@ fn draw_prompt(f: &mut Frame, edit: &TextArea, body: Rect) {
                 .right_aligned()
                 .fg(COMMENT),
         );
-    let inner = b.inner(area);
     f.render_widget(b, area);
-    draw_text_area(f, edit, inner);
+    draw_text_area(f, edit, area, EDITING);
 }
 
 fn draw_confirm(f: &mut Frame, question: &str, area: Rect) {
@@ -504,7 +539,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
             &[
                 ("click", "select issue or field"),
                 ("double-click", "edit issue or field"),
-                ("wheel", "move down / up"),
+                ("wheel", "move down / up; scroll a form field"),
                 ("drag border", "resize list and details"),
             ],
         ),
@@ -515,6 +550,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
                 ("i a enter", "edit field inline"),
                 ("c", "replace field inline"),
                 ("e", "edit field in $EDITOR"),
+                ("ctrl-e ctrl-y", "scroll field down / up"),
                 ("w ctrl-s", "save"),
                 ("esc q", "cancel"),
             ],
