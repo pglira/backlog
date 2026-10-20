@@ -9,22 +9,26 @@ use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, ListState, Para
 use crate::app::{App, FIELD_NAMES, Form, Mode};
 use crate::backlog::{Issue, Status};
 use crate::input::LineEdit;
+use crate::markdown;
 use crate::textarea::{TextArea, VimMode};
 
 // Dracula palette, https://draculatheme.com/contribute
-const BG: Color = Color::Rgb(0x28, 0x2a, 0x36);
-const CURRENT: Color = Color::Rgb(0x44, 0x47, 0x5a);
-const FG: Color = Color::Rgb(0xf8, 0xf8, 0xf2);
-const COMMENT: Color = Color::Rgb(0x62, 0x72, 0xa4);
-const CYAN: Color = Color::Rgb(0x8b, 0xe9, 0xfd);
-const GREEN: Color = Color::Rgb(0x50, 0xfa, 0x7b);
-const ORANGE: Color = Color::Rgb(0xff, 0xb8, 0x6c);
-const PINK: Color = Color::Rgb(0xff, 0x79, 0xc6);
-const PURPLE: Color = Color::Rgb(0xbd, 0x93, 0xf9);
-const RED: Color = Color::Rgb(0xff, 0x55, 0x55);
-const YELLOW: Color = Color::Rgb(0xf1, 0xfa, 0x8c);
+pub const BG: Color = Color::Rgb(0x28, 0x2a, 0x36);
+pub const CURRENT: Color = Color::Rgb(0x44, 0x47, 0x5a);
+pub const FG: Color = Color::Rgb(0xf8, 0xf8, 0xf2);
+pub const COMMENT: Color = Color::Rgb(0x62, 0x72, 0xa4);
+pub const CYAN: Color = Color::Rgb(0x8b, 0xe9, 0xfd);
+pub const GREEN: Color = Color::Rgb(0x50, 0xfa, 0x7b);
+pub const ORANGE: Color = Color::Rgb(0xff, 0xb8, 0x6c);
+pub const PINK: Color = Color::Rgb(0xff, 0x79, 0xc6);
+pub const PURPLE: Color = Color::Rgb(0xbd, 0x93, 0xf9);
+pub const RED: Color = Color::Rgb(0xff, 0x55, 0x55);
+pub const YELLOW: Color = Color::Rgb(0xf1, 0xfa, 0x8c);
 
 const ACCENT: Color = PURPLE;
+pub const CODE: Color = GREEN;
+pub const LINK: Color = CYAN;
+pub const MARKER: Color = PINK;
 const EDITING: Color = PINK;
 
 fn status_style(s: Status) -> Style {
@@ -132,14 +136,15 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) -> usize {
             if i.status == Status::Cancelled {
                 title = title.add_modifier(Modifier::CROSSED_OUT);
             }
-            ListItem::new(Line::from(vec![
+            let mut spans = vec![
                 Span::styled(format!(" {:>width$} ", i.id), Style::new().fg(COMMENT)),
                 Span::styled(
                     format!("{} ", status_symbol(i.status)),
                     status_style(i.status),
                 ),
-                Span::styled(i.title.clone(), title),
-            ]))
+            ];
+            spans.extend(markdown::inline(&i.title, title));
+            ListItem::new(Line::from(spans))
         })
         .collect();
 
@@ -188,12 +193,12 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) -> usize {
     state.offset()
 }
 
-fn section<'a>(name: &'a str, body: &'a str) -> Vec<Line<'a>> {
+fn section(name: &'static str, body: &str) -> Vec<Line<'static>> {
     let mut lines = vec![Line::styled(name, Style::new().fg(PINK).bold())];
     if body.trim().is_empty() {
         lines.push(Line::styled("—", Style::new().fg(COMMENT)));
     } else {
-        lines.extend(body.lines().map(Line::raw));
+        lines.extend(markdown::render(body, Style::new()));
     }
     lines.push(Line::raw(""));
     lines
@@ -205,7 +210,7 @@ fn draw_detail(f: &mut Frame, issue: Option<&Issue>, area: Rect) {
         return;
     };
     let mut lines = vec![
-        Line::styled(i.title.as_str(), Style::new().bold()),
+        Line::from(markdown::inline(&i.title, Style::new().bold())),
         Line::styled(
             format!("{} {}", status_symbol(i.status), i.status.as_str()),
             status_style(i.status),
@@ -395,10 +400,15 @@ fn draw_form(f: &mut Frame, form: &Form, body: Rect) {
                 Span::styled("empty", Style::new().fg(COMMENT).italic()),
                 content,
             ),
-            _ => f.render_widget(
-                Paragraph::new(form.fields[n].as_str()).wrap(Wrap { trim: false }),
-                content,
-            ),
+            // Show the fields that are not in edit as rendered Markdown.
+            _ => {
+                let lines = if n == 0 {
+                    vec![Line::from(markdown::inline(&form.fields[n], Style::new()))]
+                } else {
+                    markdown::render(&form.fields[n], Style::new())
+                };
+                f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), content)
+            }
         }
     }
 }

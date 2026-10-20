@@ -3,6 +3,7 @@
 mod app;
 mod backlog;
 mod input;
+mod markdown;
 mod textarea;
 mod ui;
 

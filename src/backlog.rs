@@ -195,15 +195,20 @@ fn parse(text: &str) -> (String, Vec<Issue>) {
             preamble.push('\n');
             continue;
         };
+        // Only the known section names start a section. Other headings, such
+        // as the Markdown headings in a field, belong to the current section.
         if let Some(name) = line.strip_prefix("### ") {
-            section = match name.trim().to_lowercase().as_str() {
-                "description" => Section::Description,
-                "done when" => Section::DoneWhen,
-                "notes" => Section::Notes,
-                "outcome" => Section::Outcome,
-                _ => Section::None,
+            let next = match name.trim().to_lowercase().as_str() {
+                "description" => Some(Section::Description),
+                "done when" => Some(Section::DoneWhen),
+                "notes" => Some(Section::Notes),
+                "outcome" => Some(Section::Outcome),
+                _ => None,
             };
-            continue;
+            if let Some(next) = next {
+                section = next;
+                continue;
+            }
         }
         let body = match section {
             Section::Description => &mut issue.description,
@@ -243,14 +248,14 @@ mod tests {
 
     #[test]
     fn round_trip() {
-        let text = "# Backlog\n\nNotes.\n\n## #1 First\nstatus: done\n\n### Description\nline 1\n\nline 2\n\n### Done when\nit works\n\n### Notes\nsee #4\n\n### Outcome\nfixed\n\n## #4 Second\nstatus: open\n";
+        let text = "# Backlog\n\nNotes.\n\n## #1 First\nstatus: done\n\n### Description\nline 1\n\nline 2\n\n### Done when\nit works\n\n### Notes\nsee #4\n\n### Outcome\n### Changes\n- fixed\n\n## #4 Second\nstatus: open\n";
         let (preamble, issues) = parse(text);
         assert_eq!(issues.len(), 2);
         assert_eq!(issues[0].status, Status::Done);
         assert_eq!(issues[0].description, "line 1\n\nline 2");
         assert_eq!(issues[0].done_when, "it works");
         assert_eq!(issues[0].notes, "see #4");
-        assert_eq!(issues[0].outcome, "fixed");
+        assert_eq!(issues[0].outcome, "### Changes\n- fixed");
         assert_eq!(issues[1].id, 4);
         let b = Backlog {
             path: PathBuf::new(),
