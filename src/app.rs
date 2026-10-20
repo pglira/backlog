@@ -317,6 +317,7 @@ impl App {
              Read the issue there first: its description says what to do, \
              and its \"Done when\" section says when the work is complete. \
              Before you start, set the status line of the issue to \"status: active\". \
+             Never set the status to \"done\": I do that after I check the work. \
              When you finish, write a short summary of the work in the \
              \"### Outcome\" section of the issue.",
             i.id,

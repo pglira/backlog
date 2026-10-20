@@ -57,8 +57,9 @@ Press `?` for all keys.
 
 `y` copies a prompt such as `Work on issue #3 "..." from the backlog file
 /path/.backlog.md. ...` to the clipboard. The prompt also asks the agent to
-set the issue to `active` when it starts, and to write a short summary of
-its work in the Outcome section when it finishes. The prompt is
+set the issue to `active` when it starts, never to set it to `done` (you do
+that after you check the work), and to write a short summary of its work in
+the Outcome section when it finishes. The prompt is
 copied with the OSC 52 escape sequence and with `wl-copy`, `xclip` or
 `xsel` when available.
 
