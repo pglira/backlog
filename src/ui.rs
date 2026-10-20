@@ -65,10 +65,15 @@ fn block(title: &str, focused: bool) -> Block<'static> {
 }
 
 pub fn draw(f: &mut Frame, app: &mut App) {
-    let [header, body, footer] = Layout::vertical([
+    let search_height = if matches!(app.mode, Mode::Search(_)) {
+        3
+    } else {
+        0
+    };
+    let [header, body, search] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(0),
-        Constraint::Length(1),
+        Constraint::Length(search_height),
     ])
     .areas(f.area());
     f.render_widget(Block::new().style(Style::new().fg(FG).bg(BG)), f.area());
@@ -81,15 +86,16 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.show_details {
         draw_detail(f, app.selected(), detail_area);
     }
-    draw_footer(f, app, footer);
 
     match &app.mode {
         Mode::Form(form) => draw_form(f, form, body),
         Mode::ConfirmDelete(id) => draw_confirm(f, &format!("Delete #{id} permanently?"), body),
         Mode::Help => draw_help(f, body),
         Mode::Prompt(edit) => draw_prompt(f, edit, body),
-        Mode::List | Mode::Search(_) => {}
+        Mode::Search(edit) => draw_search(f, edit, search),
+        Mode::List => {}
     }
+    draw_notice(f, app, body);
 }
 
 fn draw_header(f: &mut Frame, app: &App, area: Rect) {
@@ -258,93 +264,40 @@ fn hints(pairs: &[(&str, &str)]) -> Line<'static> {
     Line::from(spans)
 }
 
-fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
-    if let Mode::Search(edit) = &app.mode {
-        f.render_widget(Span::styled("/", Style::new().fg(ACCENT).bold()), area);
-        let field = Rect {
-            x: area.x + 1,
-            width: area.width.saturating_sub(1),
-            ..area
-        };
-        draw_line_edit(f, edit, field);
+fn draw_search(f: &mut Frame, edit: &LineEdit, area: Rect) {
+    let b = block("Search", true);
+    let inner = b.inner(area);
+    f.render_widget(b, area);
+    let [slash, field] =
+        Layout::horizontal([Constraint::Length(2), Constraint::Min(0)]).areas(inner);
+    f.render_widget(Span::styled("/", Style::new().fg(ACCENT).bold()), slash);
+    draw_line_edit(f, edit, field);
+}
+
+/// Draw the status message, or the question to discard the form changes, in a
+/// box at the bottom right of `area`.
+fn draw_notice(f: &mut Frame, app: &App, area: Rect) {
+    let (title, line) = if let Some(msg) = &app.message {
+        (
+            "Message",
+            Line::styled(format!(" {msg} "), Style::new().fg(YELLOW)),
+        )
+    } else if let Mode::Form(form) = &app.mode
+        && form.confirm_discard
+    {
+        (
+            "Discard?",
+            hints(&[("y", "discard changes"), ("any key", "go back")]),
+        )
+    } else {
         return;
-    }
-    if let Some(msg) = &app.message {
-        f.render_widget(
-            Line::styled(format!(" {msg}"), Style::new().fg(YELLOW)),
-            area,
-        );
-        return;
-    }
-    let line = match &app.mode {
-        Mode::Form(form) if form.confirm_discard => {
-            hints(&[("y", "discard changes"), ("any key", "go back")])
-        }
-        Mode::Form(form)
-            if form
-                .edit
-                .as_ref()
-                .is_some_and(|e| e.mode == VimMode::Insert) =>
-        {
-            let enter = if form.sel == 0 {
-                "next field"
-            } else {
-                "new line"
-            };
-            hints(&[
-                ("esc", "normal mode"),
-                ("enter", enter),
-                ("ctrl-x ctrl-e", "$EDITOR"),
-                ("ctrl-c", "discard"),
-            ])
-        }
-        Mode::Form(form) if form.edit.is_some() => hints(&[
-            ("i a o", "insert"),
-            ("h j k l w b", "move"),
-            ("x dd", "delete"),
-            ("p", "paste"),
-            ("u", "undo"),
-            ("esc", "done"),
-            ("ctrl-c", "discard"),
-        ]),
-        Mode::Form(_) => hints(&[
-            ("j/k", "field"),
-            ("i", "edit"),
-            ("c", "replace"),
-            ("e", "$EDITOR"),
-            ("w", "save"),
-            ("esc", "cancel"),
-        ]),
-        Mode::ConfirmDelete(_) => hints(&[("y", "delete"), ("any key", "keep")]),
-        Mode::Prompt(edit) if edit.mode == VimMode::Insert => hints(&[
-            ("esc", "normal mode"),
-            ("ctrl-x ctrl-e", "$EDITOR"),
-            ("ctrl-c", "discard"),
-        ]),
-        Mode::Prompt(_) => hints(&[
-            ("i a o", "insert"),
-            ("dd", "delete line"),
-            ("u", "undo"),
-            ("esc", "save"),
-            ("ctrl-c", "discard"),
-        ]),
-        _ => hints(&[
-            ("j/k", "move"),
-            ("a", "add"),
-            ("enter", "edit"),
-            ("x", "done"),
-            ("s", "active"),
-            ("c", "cancel"),
-            ("dd", "delete"),
-            ("y", "copy prompt"),
-            ("P", "edit prompt"),
-            ("p", "details"),
-            ("/", "search"),
-            ("?", "help"),
-            ("q", "quit"),
-        ]),
     };
-    f.render_widget(line, area);
+    let w = (line.width().max(title.len() + 4) as u16 + 2).min(area.width);
+    let h = 3.min(area.height);
+    let area = Rect::new(area.right() - w, area.bottom() - h, w, h);
+    f.render_widget(Clear, area);
+    let b = block(title, true).border_style(Style::new().fg(YELLOW));
+    f.render_widget(Paragraph::new(line).block(b), area);
 }
 
 /// Draw a line editor and put the terminal cursor at its cursor.
