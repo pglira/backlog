@@ -62,7 +62,8 @@ Press `?` for all keys.
 /path/.backlog.md. ...` to the clipboard. The prompt also asks the agent to
 set the issue to `active` when it starts, and never to set it to `done`
 without your explicit request. Only when you ask for `done` does the agent
-write a short summary of its work in the Outcome section. The prompt is
+write a short summary of its work in the Outcome section, as structured
+Markdown in ASD-STE100 Simplified Technical English. The prompt is
 copied with the OSC 52 escape sequence and with `wl-copy`, `xclip` or
 `xsel` when available.
 

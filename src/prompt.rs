@@ -10,7 +10,10 @@ and its \"Done when\" section (if present) says when the work is complete. \
 Before you start, set the status line of the issue to \"status: active\". \
 Never set the status to \"done\" without an explicit request from me. \
 When I ask you to set it to \"done\", also write a short summary of the work \
-in the \"### Outcome\" section of the issue; do not write the Outcome before that.";
+in the \"### Outcome\" section of the issue; do not write the Outcome before that. \
+Write the Outcome as well-structured Markdown in ASD-STE100 Simplified Technical English: \
+short bullet lists with **bold** labels, `code` for file names, commands and identifiers, \
+and no long prose paragraphs.";
 
 /// Replace the placeholders in `template` with the values of an issue.
 pub fn fill(template: &str, id: u32, title: &str, path: &str) -> String {
