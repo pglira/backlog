@@ -19,7 +19,7 @@ Each issue has an id, a title, a description, a "done when" condition,
 notes, an outcome (a short summary of the work), and a status: `open`,
 `active`, `done` or `cancelled`. The file is plain Markdown and is written
 after each change. The fields show Markdown (headings, lists, task lists,
-quotes, code, **bold**, *italic*, links) rendered; a field in edit shows
+quotes, tables, code, **bold**, *italic*, links) rendered; a field in edit shows
 the raw text:
 
 ```markdown
