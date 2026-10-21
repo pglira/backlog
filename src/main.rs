@@ -16,7 +16,8 @@ use std::{env, fs};
 
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyEventKind,
 };
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
@@ -74,9 +75,9 @@ fn run() -> io::Result<()> {
 
     let mut app = App::new(Backlog::load(&path)?);
     let mut terminal = ratatui::init();
-    let _ = execute!(io::stdout(), EnableMouseCapture);
+    let _ = execute!(io::stdout(), EnableMouseCapture, EnableBracketedPaste);
     let result = event_loop(&mut terminal, &mut app);
-    let _ = execute!(io::stdout(), DisableMouseCapture);
+    let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
     ratatui::restore();
     result
 }
@@ -105,6 +106,10 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
                 app.handle_mouse(m);
                 continue;
             }
+            Event::Paste(text) => {
+                app.handle_paste(&text);
+                continue;
+            }
             _ => continue,
         };
         if key.kind != KeyEventKind::Press {
@@ -131,9 +136,19 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
 /// Leave the TUI, run `f` on the normal screen, and come back.
 fn suspended<T>(terminal: &mut DefaultTerminal, f: impl FnOnce() -> T) -> T {
     let _ = disable_raw_mode();
-    let _ = execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
+    let _ = execute!(
+        io::stdout(),
+        DisableMouseCapture,
+        DisableBracketedPaste,
+        LeaveAlternateScreen
+    );
     let result = f();
-    let _ = execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture);
+    let _ = execute!(
+        io::stdout(),
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        EnableBracketedPaste
+    );
     let _ = enable_raw_mode();
     let _ = terminal.clear();
     result

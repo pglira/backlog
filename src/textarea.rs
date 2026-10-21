@@ -92,6 +92,31 @@ impl TextArea {
         }
     }
 
+    /// Insert pasted text at the cursor as one undo step. A single-line
+    /// editor gets the line breaks as spaces.
+    pub fn paste_text(&mut self, text: &str) {
+        let text = text.replace("\r\n", "\n").replace('\r', "\n");
+        let text = if self.single_line {
+            text.trim_end_matches('\n').replace('\n', " ")
+        } else {
+            text
+        };
+        if text.is_empty() {
+            return;
+        }
+        self.checkpoint();
+        self.pending = None;
+        if self.mode == VimMode::Normal && !self.lines[self.row].is_empty() {
+            self.col += 1;
+        }
+        let chars: Vec<char> = text.chars().collect();
+        self.put_chars(&chars);
+        if self.mode == VimMode::Normal {
+            self.col = self.col.saturating_sub(1);
+        }
+        self.clamp_col();
+    }
+
     // --- view ---------------------------------------------------------------
 
     /// Return the rows visible in a `width` x `height` area, with the lines
@@ -613,6 +638,19 @@ mod tests {
         let out = t.handle(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(matches!(out, Outcome::Submit));
         assert_eq!(t.text(), "title");
+    }
+
+    #[test]
+    fn paste_keeps_line_breaks() {
+        let mut t = TextArea::new("ab", false);
+        t.paste_text("one\r\ntwo\n");
+        assert_eq!(t.text(), "abone\ntwo\n");
+        keys(&mut t, "\x1bu");
+        assert_eq!(t.text(), "ab");
+
+        let mut t = TextArea::new("", true);
+        t.paste_text("one\ntwo\n");
+        assert_eq!(t.text(), "one two");
     }
 
     #[test]

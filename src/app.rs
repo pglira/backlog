@@ -223,6 +223,25 @@ impl App {
         }
     }
 
+    /// Insert pasted text into the active editor. Without an editor, ignore it.
+    pub fn handle_paste(&mut self, text: &str) {
+        self.message = None;
+        match &mut self.mode {
+            Mode::Search(edit) => {
+                edit.paste(text);
+                self.query = edit.text();
+                self.clamp_cursor();
+            }
+            Mode::Form(form) if !form.confirm_discard => {
+                if let Some(edit) = form.edit.as_mut() {
+                    edit.paste_text(text);
+                }
+            }
+            Mode::Prompt(edit) => edit.paste_text(text),
+            _ => {}
+        }
+    }
+
     /// Tell if a left button press is the second click of a double click.
     fn double_click(&mut self, m: MouseEvent) -> bool {
         if m.kind != MouseEventKind::Down(MouseButton::Left) {

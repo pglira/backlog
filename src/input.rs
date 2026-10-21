@@ -93,6 +93,16 @@ impl LineEdit {
         Outcome::Continue
     }
 
+    /// Insert pasted text at the cursor, with the line breaks as spaces.
+    pub fn paste(&mut self, text: &str) {
+        let line = text.trim_end_matches(['\r', '\n']).replace("\r\n", " ");
+        let chars: Vec<char> = line
+            .chars()
+            .map(|c| if c == '\r' || c == '\n' { ' ' } else { c })
+            .collect();
+        self.insert(&chars);
+    }
+
     /// Return the visible part of the text for a field of `width` columns,
     /// and the cursor column inside it.
     pub fn view(&self, width: usize) -> (String, usize) {
