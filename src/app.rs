@@ -193,9 +193,18 @@ impl App {
         size.clamp(MIN_PANE.min(max), max)
     }
 
+    /// Read the file again if another program changed it. Each change of the
+    /// file starts with this, so that the save keeps the changes of the other
+    /// program.
+    pub fn sync(&mut self) {
+        if self.backlog.changed_on_disk() {
+            self.reload();
+        }
+    }
+
     /// Read the file again after another program changed it, and keep the
     /// cursor on the same issue.
-    pub fn reload(&mut self) {
+    fn reload(&mut self) {
         let id = self.selected().map(|i| i.id);
         match Backlog::load(&self.backlog.path) {
             Ok(backlog) => {
@@ -467,6 +476,7 @@ impl App {
 
     pub fn handle_key(&mut self, key: KeyEvent) -> Effect {
         self.message = None;
+        self.sync();
         match std::mem::replace(&mut self.mode, Mode::List) {
             Mode::List => self.list_key(key),
             Mode::Search(edit) => {
@@ -509,6 +519,7 @@ impl App {
     /// Put the text from the external editor into the selected form field or
     /// into the prompt editor, or save it as the agent prompt.
     pub fn editor_done(&mut self, result: std::io::Result<String>) {
+        self.sync();
         let external = matches!(self.mode, Mode::PromptExternal);
         if external {
             self.mode = Mode::List;
@@ -749,5 +760,32 @@ impl App {
         self.save();
         self.select_id(id);
         Effect::None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn editor_keeps_changes_on_disk() {
+        let dir = std::env::temp_dir().join(format!("backlog-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".backlog.md");
+        fs::write(&path, "# Backlog\n\n## #1 First\nstatus: open\n").unwrap();
+        let mut app = App::new(Backlog::load(&path).unwrap());
+        app.mode = Mode::PromptExternal;
+
+        // Another program changes the file while the editor runs.
+        let text = "# Backlog\n\n## #1 First\nstatus: done\n\n## #2 Second\nstatus: open\n";
+        fs::write(&path, text).unwrap();
+        app.editor_done(Ok("Do #{id}.".into()));
+
+        let saved = Backlog::load(&path).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(saved.prompt.as_deref(), Some("Do #{id}."));
+        assert_eq!(saved.issues.len(), 2);
+        assert_eq!(saved.issues[0].status, Status::Done);
     }
 }

@@ -96,9 +96,7 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
         terminal.draw(|f| ui::draw(f, app))?;
         // Wait for input, and check the file for changes at each timeout.
         if !event::poll(Duration::from_millis(500))? {
-            if app.backlog.changed_on_disk() {
-                app.reload();
-            }
+            app.sync();
             continue;
         }
         let key = match event::read()? {
