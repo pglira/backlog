@@ -92,6 +92,7 @@ fn ask(question: &str) -> io::Result<bool> {
 
 fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
     loop {
+        app.expire_message();
         terminal.draw(|f| ui::draw(f, app))?;
         // Wait for input, and check the file for changes at each timeout.
         if !event::poll(Duration::from_millis(500))? {

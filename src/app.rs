@@ -22,6 +22,8 @@ const WIDE: u16 = 90;
 const MIN_PANE: u16 = 5;
 /// Maximum time between the two clicks of a double click.
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
+/// Time that a status message stays on the screen.
+const MESSAGE_TIME: Duration = Duration::from_secs(4);
 
 pub enum Mode {
     List,
@@ -101,6 +103,8 @@ pub struct App {
     pub cursor: usize,
     pub query: String,
     pub message: Option<String>,
+    /// The message on the screen and the time when it came.
+    shown: Option<(String, Instant)>,
     page: usize,
     /// Fraction of the main area that the list takes.
     split: f32,
@@ -124,6 +128,7 @@ impl App {
             cursor: 0,
             query: String::new(),
             message: None,
+            shown: None,
             page: 10,
             split: 0.45,
             body: Rect::default(),
@@ -204,6 +209,22 @@ impl App {
             Err(e) => {
                 self.message = Some(format!("Cannot read {}: {e}", self.backlog.path.display()))
             }
+        }
+    }
+
+    /// Remove the status message after `MESSAGE_TIME`. A new message starts
+    /// the time again.
+    pub fn expire_message(&mut self) {
+        let now = Instant::now();
+        match (&self.message, &self.shown) {
+            (None, _) => self.shown = None,
+            (Some(msg), Some((old, since))) if msg == old => {
+                if now.duration_since(*since) >= MESSAGE_TIME {
+                    self.message = None;
+                    self.shown = None;
+                }
+            }
+            (Some(msg), _) => self.shown = Some((msg.clone(), now)),
         }
     }
 
