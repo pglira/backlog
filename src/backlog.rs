@@ -93,6 +93,14 @@ fn stamp(path: &Path) -> Option<(SystemTime, u64)> {
 }
 
 impl Backlog {
+    /// The directory of the backlog file. Relative image paths start here.
+    pub fn base_dir(&self) -> PathBuf {
+        match self.path.parent() {
+            Some(dir) if !dir.as_os_str().is_empty() => dir.to_path_buf(),
+            _ => PathBuf::from("."),
+        }
+    }
+
     /// Search `start` and its ancestors for the backlog file.
     pub fn find(start: &Path) -> Option<PathBuf> {
         start

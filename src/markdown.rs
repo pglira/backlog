@@ -2,8 +2,8 @@
 //!
 //! Block syntax: headings, bullet and numbered lists, task lists, block
 //! quotes, fenced code blocks, horizontal rules and tables. Inline syntax:
-//! `code`, **bold**, *italic*, ~~strikethrough~~, [links](url) and backslash
-//! escapes.
+//! `code`, **bold**, *italic*, ~~strikethrough~~, [links](url), ![images](url)
+//! and backslash escapes.
 //! Unknown or unclosed syntax shows as plain text.
 
 use ratatui::style::{Modifier, Style};
@@ -11,10 +11,39 @@ use ratatui::text::{Line, Span};
 
 use crate::ui::{CODE, COMMENT, GREEN, LINK, MARKER, PURPLE};
 
-/// Render `text` as Markdown lines on top of the style `base`.
-pub fn render(text: &str, base: Style) -> Vec<Line<'static>> {
+/// Rendered Markdown: the lines, and the images that go below them.
+pub struct Rendered {
+    pub lines: Vec<Line<'static>>,
+    /// The index of a line and the URL of an image in it, in the order of
+    /// the text.
+    pub images: Vec<(usize, String)>,
+}
+
+impl Rendered {
+    /// Append `other` and keep its images below their lines.
+    pub fn extend(&mut self, other: Rendered) {
+        let offset = self.lines.len();
+        self.lines.extend(other.lines);
+        self.images
+            .extend(other.images.into_iter().map(|(n, url)| (n + offset, url)));
+    }
+}
+
+impl From<Vec<Line<'static>>> for Rendered {
+    fn from(lines: Vec<Line<'static>>) -> Rendered {
+        Rendered {
+            lines,
+            images: Vec::new(),
+        }
+    }
+}
+
+/// Render `text` as Markdown lines on top of the style `base`. The images
+/// show as their alt text in the lines; an image in a table shows only so.
+pub fn render(text: &str, base: Style) -> Rendered {
     let source: Vec<&str> = text.lines().collect();
     let mut lines = Vec::new();
+    let mut images = Vec::new();
     let mut in_code = false;
     let mut i = 0;
     while i < source.len() {
@@ -41,9 +70,11 @@ pub fn render(text: &str, base: Style) -> Vec<Line<'static>> {
             lines.extend(table(&rows, &aligns, base));
             continue;
         }
-        lines.push(block(line, base));
+        let mut urls = Vec::new();
+        lines.push(block(line, base, &mut urls));
+        images.extend(urls.into_iter().map(|url| (lines.len() - 1, url)));
     }
-    lines
+    Rendered { lines, images }
 }
 
 #[derive(Clone, Copy)]
@@ -160,7 +191,7 @@ fn table(rows: &[Vec<&str>], aligns: &[Align], base: Style) -> Vec<Line<'static>
 }
 
 /// Render one line outside of a code block.
-fn block(line: &str, base: Style) -> Line<'static> {
+fn block(line: &str, base: Style, images: &mut Vec<String>) -> Line<'static> {
     let indent_len = line.len() - line.trim_start().len();
     let indent = line[..indent_len].to_string();
     let rest = &line[indent_len..];
@@ -170,7 +201,7 @@ fn block(line: &str, base: Style) -> Line<'static> {
         if level == 1 {
             style = style.add_modifier(Modifier::UNDERLINED);
         }
-        return Line::from(inline(title, style));
+        return Line::from(images_inline(title, style, images));
     }
     if is_rule(rest) {
         return Line::from(Span::styled(
@@ -184,7 +215,7 @@ fn block(line: &str, base: Style) -> Line<'static> {
             base.patch(Style::new().fg(COMMENT)),
         )];
         let style = base.patch(Style::new().add_modifier(Modifier::ITALIC));
-        spans.extend(inline(quote.trim_start(), style));
+        spans.extend(images_inline(quote.trim_start(), style, images));
         return Line::from(spans);
     }
     if let Some(item) = ["- ", "* ", "+ "].iter().find_map(|m| rest.strip_prefix(m)) {
@@ -192,16 +223,20 @@ fn block(line: &str, base: Style) -> Line<'static> {
         let marker = base.patch(Style::new().fg(MARKER));
         if let Some(task) = item.strip_prefix("[ ] ") {
             spans.push(Span::styled("☐ ", marker));
-            spans.extend(inline(task, base));
+            spans.extend(images_inline(task, base, images));
         } else if let Some(task) = item
             .strip_prefix("[x] ")
             .or_else(|| item.strip_prefix("[X] "))
         {
             spans.push(Span::styled("☑ ", base.patch(Style::new().fg(GREEN))));
-            spans.extend(inline(task, base.patch(Style::new().fg(COMMENT))));
+            spans.extend(images_inline(
+                task,
+                base.patch(Style::new().fg(COMMENT)),
+                images,
+            ));
         } else {
             spans.push(Span::styled("• ", marker));
-            spans.extend(inline(item, base));
+            spans.extend(images_inline(item, base, images));
         }
         return Line::from(spans);
     }
@@ -210,11 +245,11 @@ fn block(line: &str, base: Style) -> Line<'static> {
             Span::raw(indent),
             Span::styled(format!("{number}. "), base.patch(Style::new().fg(MARKER))),
         ];
-        spans.extend(inline(item, base));
+        spans.extend(images_inline(item, base, images));
         return Line::from(spans);
     }
     let mut spans = vec![Span::raw(indent)];
-    spans.extend(inline(rest, base));
+    spans.extend(images_inline(rest, base, images));
     Line::from(spans)
 }
 
@@ -252,13 +287,19 @@ fn ordered_item(line: &str) -> Option<(&str, &str)> {
 
 /// Render the inline syntax of `text` on top of the style `base`.
 pub fn inline(text: &str, base: Style) -> Vec<Span<'static>> {
+    images_inline(text, base, &mut Vec::new())
+}
+
+/// Render the inline syntax of `text` on top of the style `base`, and add
+/// the URLs of its images to `images`.
+fn images_inline(text: &str, base: Style, images: &mut Vec<String>) -> Vec<Span<'static>> {
     let chars: Vec<char> = text.chars().collect();
     let mut spans = Vec::new();
-    parse_inline(&chars, base, &mut spans);
+    parse_inline(&chars, base, &mut spans, images);
     spans
 }
 
-fn parse_inline(s: &[char], style: Style, out: &mut Vec<Span<'static>>) {
+fn parse_inline(s: &[char], style: Style, out: &mut Vec<Span<'static>>, images: &mut Vec<String>) {
     let mut plain = String::new();
     let flush = |plain: &mut String, out: &mut Vec<Span<'static>>| {
         if !plain.is_empty() {
@@ -282,19 +323,35 @@ fn parse_inline(s: &[char], style: Style, out: &mut Vec<Span<'static>>) {
             i = end + 1;
             continue;
         }
+        if c == '!'
+            && s.get(i + 1) == Some(&'[')
+            && let Some((text_end, url_end)) = link(s, i + 1)
+        {
+            flush(&mut plain, out);
+            let alt: String = s[i + 2..text_end].iter().collect();
+            let alt = if alt.is_empty() { "image".into() } else { alt };
+            out.push(Span::styled(
+                format!("[{alt}]"),
+                style.patch(Style::new().fg(LINK)),
+            ));
+            images.push(s[text_end + 2..url_end].iter().collect());
+            i = url_end + 1;
+            continue;
+        }
         if c == '['
             && let Some((text_end, url_end)) = link(s, i)
+            && text_end > i + 1
         {
             flush(&mut plain, out);
             let link_style = style.patch(Style::new().fg(LINK).add_modifier(Modifier::UNDERLINED));
-            parse_inline(&s[i + 1..text_end], link_style, out);
+            parse_inline(&s[i + 1..text_end], link_style, out, images);
             i = url_end + 1;
             continue;
         }
         if let Some((open, end, modifier)) = emphasis(s, i) {
             flush(&mut plain, out);
             let inner = style.patch(Style::new().add_modifier(modifier));
-            parse_inline(&s[i + open..end], inner, out);
+            parse_inline(&s[i + open..end], inner, out, images);
             i = end + open;
             continue;
         }
@@ -309,10 +366,11 @@ fn find(s: &[char], from: usize, pattern: &[char]) -> Option<usize> {
     (from..=s.len().checked_sub(pattern.len())?).find(|&j| s[j..j + pattern.len()] == *pattern)
 }
 
-/// Parse `[text](url)` at `i`; return the positions of `]` and `)`.
+/// Parse `[text](url)` at `i`; return the positions of `]` and `)`. The
+/// text can be empty.
 fn link(s: &[char], i: usize) -> Option<(usize, usize)> {
     let text_end = find(s, i + 1, &[']'])?;
-    if s.get(text_end + 1) != Some(&'(') || text_end == i + 1 {
+    if s.get(text_end + 1) != Some(&'(') {
         return None;
     }
     let url_end = find(s, text_end + 2, &[')'])?;
@@ -394,7 +452,8 @@ mod tests {
         let lines = render(
             "| Name | **N** |\n|:-----|---:|\n| a \\| b | 1 |\n| long name | 22 |\nafter",
             Style::new(),
-        );
+        )
+        .lines;
         let rows: Vec<String> = lines.iter().map(|l| text(&l.spans)).collect();
         assert_eq!(
             rows,
@@ -411,7 +470,7 @@ mod tests {
 
     #[test]
     fn pipe_without_delimiter_row_is_text() {
-        let lines = render("a | b\nc | d", Style::new());
+        let lines = render("a | b\nc | d", Style::new()).lines;
         let rows: Vec<String> = lines.iter().map(|l| text(&l.spans)).collect();
         assert_eq!(rows, ["a | b", "c | d"]);
     }
@@ -421,7 +480,8 @@ mod tests {
         let lines = render(
             "# Head\n- item\n  - [x] done\n1. first\n> quote\n```\n**raw**\n```\n---",
             Style::new(),
-        );
+        )
+        .lines;
         let rows: Vec<String> = lines.iter().map(|l| text(&l.spans)).collect();
         assert_eq!(
             rows,
@@ -435,5 +495,16 @@ mod tests {
                 "─".repeat(24).as_str()
             ]
         );
+    }
+
+    #[test]
+    fn images() {
+        let r = render(
+            "text\n- ![Image #1](a.png) and ![](b.png)\n`![x](c.png)`",
+            Style::new(),
+        );
+        let rows: Vec<String> = r.lines.iter().map(|l| text(&l.spans)).collect();
+        assert_eq!(rows, ["text", "• [Image #1] and [image]", "![x](c.png)"]);
+        assert_eq!(r.images, [(1, "a.png".into()), (1, "b.png".into())]);
     }
 }

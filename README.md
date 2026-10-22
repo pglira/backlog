@@ -19,7 +19,7 @@ Each issue has an id, a title, a description, a "done when" condition,
 notes, an outcome (a short summary of the work), and a status: `open`,
 `active`, `done` or `cancelled`. The file is plain Markdown and is written
 after each change. The fields show Markdown (headings, lists, task lists,
-quotes, tables, code, **bold**, *italic*, links) rendered; a field in edit shows
+quotes, tables, code, **bold**, *italic*, links, images) rendered; a field in edit shows
 the raw text:
 
 ```markdown
@@ -40,6 +40,22 @@ The timeout is set in `config/session.toml`.
 ### Outcome
 The timeout is now 8 hours and comes from the configuration file.
 ```
+
+## Images
+
+In a field other than the title, `ctrl-v` pastes an image from the
+clipboard (with `wl-paste` or `xclip`). A pasted path of an image file, for
+example from a terminal that gives a dropped file or a clipboard image as a
+path, also inserts the image. `backlog` copies the image to
+`.backlog/images/` next to the backlog file and inserts a link such as
+`![Image #1](.backlog/images/3f2a9c0d1b7e4a65.png)`. The file name is a
+hash of the content.
+
+The rendered fields show each image below its line, as a small preview
+20 cells wide. An agent reads the image files. `backlog` uses the
+kitty, iTerm2 or sixel graphics protocol when the terminal supports one,
+and Unicode half blocks if not. Remove the link to remove an image from a
+field; `backlog` does not delete the image files.
 
 ## Keys
 

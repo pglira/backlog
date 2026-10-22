@@ -4,10 +4,12 @@ use ratatui::crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::layout::{Margin, Position, Rect};
+use ratatui_image::picker::Picker;
 use std::cell::Cell;
 use std::time::{Duration, Instant};
 
 use crate::backlog::{Backlog, Issue, Status};
+use crate::images::{self, Images};
 use crate::input::{LineEdit, Outcome};
 use crate::prompt;
 use crate::textarea::TextArea;
@@ -24,6 +26,9 @@ const MIN_PANE: u16 = 5;
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// Time that a status message stays on the screen.
 const MESSAGE_TIME: Duration = Duration::from_secs(4);
+/// Time in which a second paste of the same image is ignored. A terminal can
+/// give one image both as `ctrl-v` and as a pasted file path.
+const SAME_PASTE: Duration = Duration::from_secs(2);
 
 pub enum Mode {
     List,
@@ -76,6 +81,23 @@ impl Form {
         }
     }
 
+    /// Insert a link to the image at `path` at the cursor of the field in
+    /// edit, with the next free image number of the form.
+    fn insert_image_link(&mut self, path: &str) {
+        let Some(edit) = self.edit.as_mut() else {
+            return;
+        };
+        let current = edit.text();
+        let others = self
+            .fields
+            .iter()
+            .enumerate()
+            .filter(|&(n, _)| n != self.sel)
+            .map(|(_, t)| t.as_str());
+        let n = images::last_number(others.chain([current.as_str()])) + 1;
+        edit.paste_text(&format!("![Image #{n}]({path})"));
+    }
+
     fn external(&self, text: String) -> Effect {
         Effect::Editor {
             text,
@@ -118,10 +140,14 @@ pub struct App {
     last_click: Option<(Instant, u16, u16)>,
     /// The first key of a two-key list command (`gg`, `dd`).
     pending: Option<char>,
+    pub images: Images,
+    /// The path of the last pasted image and the time of the paste.
+    last_image: Option<(String, Instant)>,
 }
 
 impl App {
-    pub fn new(backlog: Backlog) -> App {
+    pub fn new(backlog: Backlog, picker: Picker) -> App {
+        let base = backlog.base_dir();
         App {
             backlog,
             mode: Mode::List,
@@ -138,6 +164,8 @@ impl App {
             dragging: false,
             last_click: None,
             pending: None,
+            images: Images::new(picker, base),
+            last_image: None,
         }
     }
 
@@ -253,9 +281,18 @@ impl App {
         }
     }
 
-    /// Insert pasted text into the active editor. Without an editor, ignore it.
+    /// Insert pasted text into the active editor. Without an editor, ignore
+    /// it. The path of an image file inserts the image into a form field.
     pub fn handle_paste(&mut self, text: &str) {
         self.message = None;
+        if let Mode::Form(form) = &self.mode
+            && form.edit.is_some()
+            && form.sel != TITLE
+            && let Some((data, ext)) = images::from_pasted_path(text)
+        {
+            self.paste_image(&data, &ext);
+            return;
+        }
         match &mut self.mode {
             Mode::Search(edit) => {
                 edit.paste(text);
@@ -270,6 +307,42 @@ impl App {
             Mode::Prompt(edit) => edit.paste_text(text),
             _ => {}
         }
+    }
+
+    /// Insert the image from the clipboard into the form field in edit.
+    fn paste_clipboard_image(&mut self) {
+        match images::from_clipboard() {
+            Some((data, ext)) => self.paste_image(&data, ext),
+            None => self.message = Some("The clipboard holds no image".into()),
+        }
+    }
+
+    /// Store the image `data` and insert a link to it into the form field
+    /// in edit, except when the same image came within `SAME_PASTE`. The
+    /// title takes no images.
+    fn paste_image(&mut self, data: &[u8], ext: &str) {
+        let Mode::Form(form) = &mut self.mode else {
+            return;
+        };
+        if form.sel == TITLE {
+            self.message = Some("The title cannot hold an image".into());
+            return;
+        }
+        let path = match images::store(&self.backlog.base_dir(), data, ext) {
+            Ok(path) => path,
+            Err(e) => {
+                self.message = Some(format!("Cannot store the image: {e}"));
+                return;
+            }
+        };
+        let repeated = self
+            .last_image
+            .as_ref()
+            .is_some_and(|(last, t)| *last == path && t.elapsed() < SAME_PASTE);
+        if !repeated {
+            form.insert_image_link(&path);
+        }
+        self.last_image = Some((path, Instant::now()));
     }
 
     /// Tell if a left button press is the second click of a double click.
@@ -659,11 +732,17 @@ impl App {
     fn form_key(&mut self, mut form: Box<Form>, key: KeyEvent) -> Effect {
         let mut effect = Effect::None;
 
+        let ctrl_v =
+            key.code == KeyCode::Char('v') && key.modifiers.contains(KeyModifiers::CONTROL);
         if form.confirm_discard {
             if key.code == KeyCode::Char('y') {
                 return Effect::None;
             }
             form.confirm_discard = false;
+        } else if ctrl_v && form.edit.is_some() {
+            self.mode = Mode::Form(form);
+            self.paste_clipboard_image();
+            return Effect::None;
         } else if let Some(edit) = form.edit.as_mut() {
             match edit.handle(key) {
                 Outcome::Continue => {}
@@ -774,7 +853,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join(".backlog.md");
         fs::write(&path, "# Backlog\n\n## #1 First\nstatus: open\n").unwrap();
-        let mut app = App::new(Backlog::load(&path).unwrap());
+        let mut app = App::new(Backlog::load(&path).unwrap(), Picker::halfblocks());
         app.mode = Mode::PromptExternal;
 
         // Another program changes the file while the editor runs.

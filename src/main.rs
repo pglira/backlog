@@ -2,6 +2,7 @@
 
 mod app;
 mod backlog;
+mod images;
 mod input;
 mod markdown;
 mod prompt;
@@ -23,6 +24,7 @@ use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+use ratatui_image::picker::Picker;
 
 use app::{App, Effect};
 use backlog::{Backlog, FILE_NAME};
@@ -73,8 +75,12 @@ fn run() -> io::Result<()> {
     }
     let path = path.canonicalize().unwrap_or(path);
 
-    let mut app = App::new(Backlog::load(&path)?);
+    let backlog = Backlog::load(&path)?;
     let mut terminal = ratatui::init();
+    // Ask the terminal for its graphics protocol and font size; without an
+    // answer, draw the images with half blocks.
+    let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
+    let mut app = App::new(backlog, picker);
     let _ = execute!(io::stdout(), EnableMouseCapture, EnableBracketedPaste);
     let result = event_loop(&mut terminal, &mut app);
     let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
@@ -119,6 +125,7 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
             Effect::Quit => return Ok(()),
             Effect::Editor { text, single_line } => {
                 let result = suspended(terminal, || edit_external(&text));
+                app.images.clear();
                 let result = result.map(|t| if single_line { join_lines(&t) } else { t });
                 app.editor_done(result);
             }

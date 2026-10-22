@@ -3,7 +3,7 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Margin, Position, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
-use ratatui::text::{Line, Span, Text};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, BorderType, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
     ScrollbarOrientation, ScrollbarState, Wrap,
@@ -11,8 +11,9 @@ use ratatui::widgets::{
 
 use crate::app::{App, FIELD_NAMES, Form, Mode};
 use crate::backlog::{Issue, Status};
+use crate::images::{self, Images};
 use crate::input::LineEdit;
-use crate::markdown;
+use crate::markdown::{self, Rendered};
 use crate::textarea::{TextArea, VimMode};
 
 // Dracula palette, https://draculatheme.com/contribute
@@ -84,11 +85,16 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     draw_header(f, app, header);
     app.list_offset = draw_list(f, app, list_area);
     if app.show_details {
-        draw_detail(f, app.selected(), detail_area);
+        // A popup covers most of the details, so they show no images.
+        let show = matches!(
+            app.mode,
+            Mode::List | Mode::Search(_) | Mode::PromptExternal
+        );
+        draw_detail(f, app.selected(), &app.images, show, detail_area);
     }
 
     match &app.mode {
-        Mode::Form(form) => draw_form(f, form, body),
+        Mode::Form(form) => draw_form(f, form, &app.images, body),
         Mode::ConfirmDelete(id) => draw_confirm(f, &format!("Delete #{id} permanently?"), body),
         Mode::Help => draw_help(f, body),
         Mode::Prompt(edit) => draw_prompt(f, edit, body),
@@ -96,6 +102,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Mode::List | Mode::PromptExternal => {}
     }
     draw_notice(f, app, body);
+    app.images.check_sent(f.buffer_mut());
 }
 
 fn draw_header(f: &mut Frame, app: &App, area: Rect) {
@@ -221,38 +228,105 @@ fn title_spans(i: &Issue, style: Style) -> Vec<Span<'static>> {
     ]
 }
 
-fn section(name: &'static str, body: &str) -> Vec<Line<'static>> {
-    let mut lines = vec![Line::styled(name, Style::new().fg(PINK).bold())];
+fn section(name: &'static str, body: &str) -> Rendered {
+    let mut r = Rendered::from(vec![Line::styled(name, Style::new().fg(PINK).bold())]);
     if body.trim().is_empty() {
-        lines.push(Line::styled("—", Style::new().fg(COMMENT)));
+        r.lines.push(Line::styled("—", Style::new().fg(COMMENT)));
     } else {
-        lines.extend(markdown::render(body, Style::new()));
+        r.extend(markdown::render(body, Style::new()));
     }
-    lines.push(Line::raw(""));
-    lines
+    r.lines.push(Line::raw(""));
+    r
 }
 
-fn draw_detail(f: &mut Frame, issue: Option<&Issue>, area: Rect) {
+/// Draw the details of `issue`. Without `show_images`, the images show only
+/// as their alt text.
+fn draw_detail(
+    f: &mut Frame,
+    issue: Option<&Issue>,
+    images: &Images,
+    show_images: bool,
+    area: Rect,
+) {
     let Some(i) = issue else {
         f.render_widget(block("Details", false), area);
         return;
     };
-    let mut lines = vec![
+    let mut r = Rendered::from(vec![
         Line::from(title_spans(i, Style::new().bold())),
         Line::styled(
             format!("{} {}", status_symbol(i.status), i.status.as_str()),
             status_style(i.status),
         ),
         Line::raw(""),
-    ];
-    lines.extend(section("Description", &i.description));
-    lines.extend(section("Done when", &i.done_when));
-    lines.extend(section("Notes", &i.notes));
-    lines.extend(section("Outcome", &i.outcome));
-    let p = Paragraph::new(Text::from(lines))
-        .wrap(Wrap { trim: false })
-        .block(block(&format!("#{}", i.id), false));
-    f.render_widget(p, area);
+    ]);
+    r.extend(section("Description", &i.description));
+    r.extend(section("Done when", &i.done_when));
+    r.extend(section("Notes", &i.notes));
+    r.extend(section("Outcome", &i.outcome));
+    if !show_images {
+        r.images.clear();
+    }
+    let b = block(&format!("#{}", i.id), false);
+    let inner = b.inner(area);
+    f.render_widget(b, area);
+    RichText::new(r, images, inner.width).draw(f, images, inner, 0);
+}
+
+/// Rendered Markdown wrapped to a width, with empty rows below the lines
+/// that hold images. The images go into these rows.
+struct RichText {
+    lines: Vec<Line<'static>>,
+    /// The first row and the URL of each image.
+    images: Vec<(usize, String)>,
+    /// The width of the images in cells.
+    image_width: u16,
+    rows: usize,
+}
+
+impl RichText {
+    /// Wrap `r` to `width` and make room for the images, each scaled to
+    /// `images::WIDTH` cells, or to `width` if that is less. An image that
+    /// cannot be read shows only as its alt text.
+    fn new(r: Rendered, images: &Images, width: u16) -> RichText {
+        let mut text = RichText {
+            lines: Vec::new(),
+            images: Vec::new(),
+            image_width: images::WIDTH.min(width),
+            rows: 0,
+        };
+        if width == 0 {
+            return text;
+        }
+        let mut pending = r.images.into_iter().peekable();
+        for (n, line) in r.lines.into_iter().enumerate() {
+            text.rows += Paragraph::new(line.clone())
+                .wrap(Wrap { trim: false })
+                .line_count(width);
+            text.lines.push(line);
+            while let Some((_, url)) = pending.next_if(|(m, _)| *m == n) {
+                let Some(size) = images.size(&url, text.image_width) else {
+                    continue;
+                };
+                text.images.push((text.rows, url));
+                let height = size.height as usize;
+                text.lines
+                    .extend(std::iter::repeat_n(Line::raw(""), height));
+                text.rows += height;
+            }
+        }
+        text
+    }
+
+    /// Draw the rows from `scroll` on into `area`.
+    fn draw(self, f: &mut Frame, images: &Images, area: Rect, scroll: u16) {
+        let p = Paragraph::new(self.lines).wrap(Wrap { trim: false });
+        f.render_widget(p.scroll((scroll, 0)), area);
+        for (row, url) in self.images {
+            let y = (row as i64 - scroll as i64).clamp(i16::MIN as i64, i16::MAX as i64);
+            images.draw(f, &url, self.image_width, area, (0, y as i16).into());
+        }
+    }
 }
 
 fn hints(pairs: &[(&str, &str)]) -> Line<'static> {
@@ -375,7 +449,7 @@ fn draw_text_area(f: &mut Frame, edit: &TextArea, area: Rect, color: Color) {
     draw_scrollbar(f, area, total, scroll, color);
 }
 
-fn draw_form(f: &mut Frame, form: &Form, body: Rect) {
+fn draw_form(f: &mut Frame, form: &Form, images: &Images, body: Rect) {
     let area = form_area(body);
     f.render_widget(Clear, area);
     let title = match form.id {
@@ -417,17 +491,20 @@ fn draw_form(f: &mut Frame, form: &Form, body: Rect) {
             ),
             // Show the fields that are not in edit as rendered Markdown.
             _ => {
-                let lines = if n == 0 {
-                    vec![Line::from(markdown::inline(&form.fields[n], Style::new()))]
+                let r = if n == 0 {
+                    Rendered::from(vec![Line::from(markdown::inline(
+                        &form.fields[n],
+                        Style::new(),
+                    ))])
                 } else {
                     markdown::render(&form.fields[n], Style::new())
                 };
-                let p = Paragraph::new(lines).wrap(Wrap { trim: false });
-                let total = p.line_count(content.width);
+                let text = RichText::new(r, images, content.width);
+                let total = text.rows;
                 let max = total.saturating_sub(content.height as usize) as u16;
                 let offset = form.scroll[n].get().min(max);
                 form.scroll[n].set(offset);
-                f.render_widget(p.scroll((offset, 0)), content);
+                text.draw(f, images, content, offset);
                 draw_scrollbar(f, rect, total, offset as usize, color);
             }
         }
@@ -560,6 +637,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
             "Field: both modes",
             &[
                 ("ctrl-x ctrl-e", "continue in $EDITOR"),
+                ("ctrl-v", "paste an image (not in the title)"),
                 ("ctrl-c", "discard the changes"),
             ],
         ),
@@ -574,4 +652,39 @@ fn draw_help(f: &mut Frame, area: Rect) {
     let [a, b] = Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)]).areas(inner);
     f.render_widget(Paragraph::new(left), a);
     f.render_widget(Paragraph::new(right), b);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui_image::picker::Picker;
+
+    #[test]
+    fn images_below_their_lines() {
+        let dir = std::env::temp_dir().join(format!("backlog-ui-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let img = image::RgbImage::from_pixel(40, 40, image::Rgb([255, 0, 0]));
+        img.save(dir.join("red.png")).unwrap();
+        let images = Images::new(Picker::halfblocks(), dir.clone());
+
+        let r = markdown::render("a ![Image #1](red.png)\nb ![x](missing.png)", Style::new());
+        let text = RichText::new(r, &images, 20);
+        let mut terminal = Terminal::new(TestBackend::new(20, 12)).unwrap();
+        terminal
+            .draw(|f| text.draw(f, &images, f.area(), 0))
+            .unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        let buf = terminal.backend().buffer();
+        let row = |y: u16| -> String { (0..20).map(|x| buf[(x, y)].symbol()).collect() };
+        assert_eq!(row(0).trim_end(), "a [Image #1]");
+        // The image takes the rows below its line; the missing image shows
+        // only as its alt text.
+        assert_eq!(buf[(0, 1)].bg, Color::Rgb(255, 0, 0));
+        let last = (1..12).find(|&y| row(y).starts_with('b')).unwrap();
+        assert!(last > 1);
+        assert_eq!(row(last).trim_end(), "b [x]");
+    }
 }
