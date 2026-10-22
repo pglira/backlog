@@ -18,6 +18,8 @@ use crate::ui;
 pub const FIELD_NAMES: [&str; 5] = ["Title", "Description", "Done when", "Notes", "Outcome"];
 const TITLE: usize = 0;
 const DESCRIPTION: usize = 1;
+/// The outcome takes the right half of the form; the other fields are on the left.
+const OUTCOME: usize = 4;
 /// Minimum width of the main area for the list and the details side by side.
 const WIDE: u16 = 90;
 /// Minimum size of a pane along the split direction.
@@ -53,6 +55,8 @@ pub struct Form {
     /// The first visible row of each field that is not in edit. The draw
     /// clamps it to the length of the text.
     pub scroll: [Cell<u16>; 5],
+    /// The field on the left that `h` goes back to from the outcome.
+    left: usize,
 }
 
 impl Form {
@@ -706,6 +710,7 @@ impl App {
             edit: None,
             confirm_discard: false,
             scroll: Default::default(),
+            left: TITLE,
         }));
     }
 
@@ -726,6 +731,7 @@ impl App {
             edit: None,
             confirm_discard: false,
             scroll: Default::default(),
+            left: TITLE,
         }));
     }
 
@@ -770,6 +776,11 @@ impl App {
                 KeyCode::Char('k') | KeyCode::Up | KeyCode::BackTab => {
                     form.sel = (form.sel + FIELD_NAMES.len() - 1) % FIELD_NAMES.len()
                 }
+                KeyCode::Char('l') | KeyCode::Right if form.sel != OUTCOME => {
+                    form.left = form.sel;
+                    form.sel = OUTCOME;
+                }
+                KeyCode::Char('h') | KeyCode::Left if form.sel == OUTCOME => form.sel = form.left,
                 KeyCode::Char('i') | KeyCode::Char('a') | KeyCode::Enter => form.start_edit(false),
                 KeyCode::Char('c') | KeyCode::Char('S') => form.start_edit(true),
                 KeyCode::Char('e') if ctrl => form.scroll_field(form.sel, 1),
@@ -846,6 +857,35 @@ impl App {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn form_columns() {
+        let dir = std::env::temp_dir().join(format!("backlog-columns-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".backlog.md");
+        fs::write(&path, "# Backlog\n\n## #1 First\nstatus: open\n").unwrap();
+        let mut app = App::new(Backlog::load(&path).unwrap(), Picker::halfblocks());
+        fs::remove_dir_all(&dir).unwrap();
+        let press = |app: &mut App, c: char| {
+            app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        };
+        let sel = |app: &App| match &app.mode {
+            Mode::Form(form) => form.sel,
+            _ => panic!("no form"),
+        };
+
+        press(&mut app, 'e');
+        press(&mut app, 'j');
+        assert_eq!(sel(&app), DESCRIPTION);
+        press(&mut app, 'l');
+        assert_eq!(sel(&app), OUTCOME);
+        press(&mut app, 'l');
+        assert_eq!(sel(&app), OUTCOME);
+        press(&mut app, 'h');
+        assert_eq!(sel(&app), DESCRIPTION);
+        press(&mut app, 'h');
+        assert_eq!(sel(&app), DESCRIPTION);
+    }
 
     #[test]
     fn editor_keeps_changes_on_disk() {

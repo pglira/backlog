@@ -596,6 +596,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
             "Form",
             &[
                 ("j k tab", "next / previous field"),
+                ("h l", "left fields / outcome"),
                 ("i a enter", "edit field inline"),
                 ("c", "replace field inline"),
                 ("e", "edit field in $EDITOR"),
