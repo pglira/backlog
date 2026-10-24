@@ -8,13 +8,14 @@ use ratatui::widgets::{
     Block, BorderType, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
     ScrollbarOrientation, ScrollbarState, Wrap,
 };
+use std::cell::Cell;
 
 use crate::app::{App, FIELD_NAMES, Form, Mode};
 use crate::backlog::{Issue, Status};
 use crate::images::Images;
 use crate::input::LineEdit;
 use crate::markdown::{self, Rendered};
-use crate::settings::{Kind, SETTINGS, Settings};
+use crate::settings::{self, Kind, SETTINGS, Settings};
 use crate::textarea::{TextArea, VimMode};
 
 // Dracula palette, https://draculatheme.com/contribute
@@ -54,10 +55,19 @@ fn status_symbol(s: Status) -> &'static str {
     }
 }
 
+thread_local! {
+    /// The type of all borders, from the settings of the current draw.
+    static BORDER: Cell<BorderType> = const { Cell::new(BorderType::Rounded) };
+}
+
+fn border_type() -> BorderType {
+    BORDER.with(Cell::get)
+}
+
 fn block(title: &str, focused: bool) -> Block<'static> {
     let color = if focused { ACCENT } else { COMMENT };
     Block::bordered()
-        .border_type(BorderType::Rounded)
+        .border_type(border_type())
         .style(Style::new().fg(FG).bg(BG))
         .border_style(Style::new().fg(color))
         .title(Span::styled(
@@ -67,6 +77,13 @@ fn block(title: &str, focused: bool) -> Block<'static> {
 }
 
 pub fn draw(f: &mut Frame, app: &mut App) {
+    BORDER.with(|b| {
+        b.set(if app.settings.is_on(settings::ROUNDED) {
+            BorderType::Rounded
+        } else {
+            BorderType::Plain
+        })
+    });
     let search_height = if matches!(app.mode, Mode::Search(_)) {
         3
     } else {
@@ -482,7 +499,7 @@ fn draw_form(f: &mut Frame, form: &Form, images: &Images, body: Rect) {
             _ => "",
         };
         let b = Block::bordered()
-            .border_type(BorderType::Rounded)
+            .border_type(border_type())
             .style(Style::new().fg(FG).bg(BG))
             .border_style(Style::new().fg(color))
             .title(Span::styled(

@@ -1018,6 +1018,16 @@ mod tests {
         press(&mut app, KeyCode::Char('j'));
         press(&mut app, KeyCode::Char(' '));
         assert_eq!(app.images.width, 0);
+        let corner = |app: &mut App| {
+            let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 10)).unwrap();
+            t.draw(|f| ui::draw(f, app)).unwrap();
+            t.backend().buffer()[(0, 1)].symbol().to_string()
+        };
+        assert_eq!(corner(&mut app), "╭");
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char(' '));
+        assert_eq!(corner(&mut app), "┌");
         press(&mut app, KeyCode::Esc);
         assert!(matches!(app.mode, Mode::List));
     }

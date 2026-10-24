@@ -33,7 +33,7 @@ pub struct Setting {
 }
 
 /// All settings, in the order of the settings popup.
-pub const SETTINGS: [Setting; 6] = [
+pub const SETTINGS: [Setting; 7] = [
     Setting {
         key: "details",
         label: "Show the details at start",
@@ -80,6 +80,12 @@ pub const SETTINGS: [Setting; 6] = [
         },
         default: 20,
     },
+    Setting {
+        key: "rounded",
+        label: "Rounded corners",
+        kind: Kind::Toggle,
+        default: 1,
+    },
 ];
 
 /// The index of each setting in `SETTINGS`.
@@ -89,6 +95,7 @@ pub const HIDE_CLOSED: usize = 2;
 pub const NEWEST_FIRST: usize = 3;
 pub const IMAGES: usize = 4;
 pub const IMAGE_WIDTH: usize = 5;
+pub const ROUNDED: usize = 6;
 
 type Values = [u16; SETTINGS.len()];
 
@@ -260,7 +267,7 @@ mod tests {
     fn update_keeps_other_lines() {
         let mut values = SETTINGS.map(|s| s.default);
         values[DETAILS] = 0;
-        let all = "details = false\nsplit = 45\nhide_closed = false\nnewest_first = false\nimages = true\nimage_width = 20\n";
+        let all = "details = false\nsplit = 45\nhide_closed = false\nnewest_first = false\nimages = true\nimage_width = 20\nrounded = true\n";
         assert_eq!(update("", &values), all);
         assert_eq!(
             update("# Settings\ndetails = true\nother = 1\n", &values),

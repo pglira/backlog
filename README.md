@@ -87,6 +87,7 @@ hide_closed = false  # hide done and cancelled issues
 newest_first = false # show the newest issues first
 images = true        # show image previews
 image_width = 20     # width of the image previews, in cells (10 to 60)
+rounded = true       # rounded corners of the borders
 ```
 
 A drag of the border between the list and the details also saves `split`.
