@@ -12,6 +12,7 @@ use crate::backlog::{Backlog, Issue, Status};
 use crate::images::{self, Images};
 use crate::input::{LineEdit, Outcome};
 use crate::prompt;
+use crate::settings::{self, Settings};
 use crate::textarea::TextArea;
 use crate::ui;
 
@@ -42,6 +43,8 @@ pub enum Mode {
     Prompt(TextArea),
     /// Wait for the external editor with the template of the agent prompt.
     PromptExternal,
+    /// The settings popup, with the index of the selected setting.
+    Settings(usize),
 }
 
 /// The editor for one issue. `id` is `None` for a new issue.
@@ -122,6 +125,15 @@ pub enum Effect {
     Copy(String),
 }
 
+/// The width of the image previews from the settings; 0 if they are off.
+fn image_width(settings: &Settings) -> u16 {
+    if settings.is_on(settings::IMAGES) {
+        settings.get(settings::IMAGE_WIDTH)
+    } else {
+        0
+    }
+}
+
 pub struct App {
     pub backlog: Backlog,
     pub mode: Mode,
@@ -140,6 +152,7 @@ pub struct App {
     /// The index of the first visible row of the list.
     pub list_offset: usize,
     pub show_details: bool,
+    pub settings: Settings,
     dragging: bool,
     last_click: Option<(Instant, u16, u16)>,
     /// The first key of a two-key list command (`gg`, `dd`).
@@ -150,7 +163,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(backlog: Backlog, picker: Picker) -> App {
+    pub fn new(backlog: Backlog, picker: Picker, settings: Settings) -> App {
         let base = backlog.base_dir();
         App {
             backlog,
@@ -160,16 +173,17 @@ impl App {
             message: None,
             shown: None,
             page: 10,
-            split: 0.45,
+            split: settings.get(settings::SPLIT) as f32 / 100.0,
             body: Rect::default(),
             list_area: Rect::default(),
             list_offset: 0,
-            show_details: true,
+            show_details: settings.is_on(settings::DETAILS),
             dragging: false,
             last_click: None,
             pending: None,
-            images: Images::new(picker, base),
+            images: Images::new(picker, base, image_width(&settings)),
             last_image: None,
+            settings,
         }
     }
 
@@ -275,6 +289,9 @@ impl App {
             Mode::List | Mode::Search(_) => self.list_mouse(m, double),
             Mode::Form(_) => self.form_mouse(m, double),
             Mode::Help if matches!(m.kind, MouseEventKind::Down(_)) => self.mode = Mode::List,
+            Mode::Settings(_) if matches!(m.kind, MouseEventKind::Down(_)) => {
+                self.mode = Mode::List
+            }
             Mode::Prompt(ref mut edit) if m.kind == MouseEventKind::Down(MouseButton::Left) => {
                 let text = ui::prompt_area(self.body).inner(Margin::new(1, 1));
                 if text.contains(Position::new(m.column, m.row)) {
@@ -463,6 +480,10 @@ impl App {
                     ((pos + 1).saturating_sub(start) as f32 / total as f32).clamp(0.0, 1.0);
             }
             MouseEventKind::Up(MouseButton::Left) => {
+                if self.dragging {
+                    let percent = (self.split * 100.0).round() as u16;
+                    self.change_setting(settings::SPLIT, |s| s.set(settings::SPLIT, percent));
+                }
                 return std::mem::take(&mut self.dragging);
             }
             _ => {}
@@ -503,13 +524,18 @@ impl App {
         self.page = (rows as usize).max(2);
     }
 
-    /// Indices into `backlog.issues` of the issues that match the search.
+    /// Indices into `backlog.issues` of the issues that match the search,
+    /// without the done and cancelled issues if the settings hide them, in the
+    /// order of the file or, if the settings say so, in the reverse order.
     pub fn visible(&self) -> Vec<usize> {
         let query = self.query.to_lowercase();
-        self.backlog
+        let hide_closed = self.settings.is_on(settings::HIDE_CLOSED);
+        let mut visible: Vec<usize> = self
+            .backlog
             .issues
             .iter()
             .enumerate()
+            .filter(|(_, i)| !(hide_closed && matches!(i.status, Status::Done | Status::Cancelled)))
             .filter(|(_, i)| {
                 query.is_empty()
                     || [&i.title, &i.description, &i.done_when, &i.notes, &i.outcome]
@@ -517,7 +543,11 @@ impl App {
                         .any(|s| s.to_lowercase().contains(&query))
             })
             .map(|(n, _)| n)
-            .collect()
+            .collect();
+        if self.settings.is_on(settings::NEWEST_FIRST) {
+            visible.reverse();
+        }
+        visible
     }
 
     pub fn selected(&self) -> Option<&Issue> {
@@ -571,6 +601,10 @@ impl App {
                 Effect::None
             }
             Mode::Help | Mode::PromptExternal => Effect::None,
+            Mode::Settings(sel) => {
+                self.settings_key(sel, key);
+                Effect::None
+            }
             Mode::Prompt(mut edit) => match edit.handle(key) {
                 Outcome::Leave | Outcome::Submit => {
                     self.save_prompt(&edit.text());
@@ -635,6 +669,7 @@ impl App {
             KeyCode::Char('q') => return Effect::Quit,
             KeyCode::Char('c') if ctrl => return Effect::Quit,
             KeyCode::Char('?') => self.mode = Mode::Help,
+            KeyCode::Char('S') => self.mode = Mode::Settings(0),
 
             KeyCode::Char('j') | KeyCode::Down => self.cursor += 1,
             KeyCode::Char('k') | KeyCode::Up => self.cursor = self.cursor.saturating_sub(1),
@@ -672,6 +707,54 @@ impl App {
         }
         self.clamp_cursor();
         Effect::None
+    }
+
+    /// Move in the settings popup, and change and save the selected setting:
+    /// `space` toggles a toggle, and `h` / `l` change a number or a toggle.
+    fn settings_key(&mut self, sel: usize, key: KeyEvent) {
+        let last = settings::SETTINGS.len() - 1;
+        let toggle = matches!(settings::SETTINGS[sel].kind, settings::Kind::Toggle);
+        let dir = match key.code {
+            KeyCode::Esc | KeyCode::Char('q' | 'S') => return,
+            KeyCode::Char('j') | KeyCode::Down | KeyCode::Tab => {
+                self.mode = Mode::Settings((sel + 1).min(last));
+                return;
+            }
+            KeyCode::Char('k') | KeyCode::Up | KeyCode::BackTab => {
+                self.mode = Mode::Settings(sel.saturating_sub(1));
+                return;
+            }
+            KeyCode::Enter | KeyCode::Char(' ' | 'x') if toggle => 1,
+            KeyCode::Char('l') | KeyCode::Right | KeyCode::Char('+') => 1,
+            KeyCode::Char('h') | KeyCode::Left | KeyCode::Char('-') => -1,
+            _ => 0,
+        };
+        if dir != 0 {
+            self.change_setting(sel, |s| s.change(sel, dir));
+        }
+        self.mode = Mode::Settings(sel);
+    }
+
+    /// Change the setting `n` with `f`, show an error if the file cannot be
+    /// written, and apply the new value at once. The cursor stays on the same
+    /// issue if it is still in the list.
+    fn change_setting(&mut self, n: usize, f: impl FnOnce(&mut Settings) -> std::io::Result<()>) {
+        let id = self.selected().map(|i| i.id);
+        if let Err(e) = f(&mut self.settings) {
+            self.message = Some(format!("Cannot save the settings: {e}"));
+        }
+        match n {
+            settings::DETAILS => self.show_details = self.settings.is_on(n),
+            settings::SPLIT => self.split = self.settings.get(n) as f32 / 100.0,
+            settings::IMAGES | settings::IMAGE_WIDTH => {
+                self.images.width = image_width(&self.settings)
+            }
+            _ => {}
+        }
+        match id {
+            Some(id) => self.select_id(id),
+            None => self.clamp_cursor(),
+        }
     }
 
     fn search_key(&mut self, mut edit: LineEdit, key: KeyEvent) {
@@ -864,7 +947,11 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join(".backlog.md");
         fs::write(&path, "# Backlog\n\n## #1 First\nstatus: open\n").unwrap();
-        let mut app = App::new(Backlog::load(&path).unwrap(), Picker::halfblocks());
+        let mut app = App::new(
+            Backlog::load(&path).unwrap(),
+            Picker::halfblocks(),
+            Settings::defaults(),
+        );
         fs::remove_dir_all(&dir).unwrap();
         let press = |app: &mut App, c: char| {
             app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
@@ -888,12 +975,64 @@ mod tests {
     }
 
     #[test]
+    fn settings_popup() {
+        let dir = std::env::temp_dir().join(format!("backlog-settings-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".backlog.md");
+        fs::write(
+            &path,
+            "# Backlog\n\n## #1 First\nstatus: open\n\n## #2 Second\nstatus: done\n",
+        )
+        .unwrap();
+        let mut app = App::new(
+            Backlog::load(&path).unwrap(),
+            Picker::halfblocks(),
+            Settings::defaults(),
+        );
+        fs::remove_dir_all(&dir).unwrap();
+        let press = |app: &mut App, code: KeyCode| {
+            app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+        };
+
+        assert!(app.show_details);
+        press(&mut app, KeyCode::Char('S'));
+        assert!(matches!(app.mode, Mode::Settings(0)));
+        press(&mut app, KeyCode::Char(' '));
+        assert!(!app.settings.is_on(settings::DETAILS));
+        assert!(!app.show_details);
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char('l'));
+        assert_eq!(app.settings.get(settings::SPLIT), 50);
+        assert_eq!(app.split, 0.5);
+        press(&mut app, KeyCode::Char('j'));
+        assert_eq!(app.visible().len(), 2);
+        press(&mut app, KeyCode::Char(' '));
+        assert_eq!(app.visible().len(), 1);
+        press(&mut app, KeyCode::Char(' '));
+        press(&mut app, KeyCode::Char('j'));
+        assert_eq!(app.visible().len(), 2);
+        assert_eq!(app.selected().map(|i| i.id), Some(1));
+        press(&mut app, KeyCode::Char(' '));
+        assert_eq!(app.visible(), [1, 0]);
+        assert_eq!(app.selected().map(|i| i.id), Some(1));
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char(' '));
+        assert_eq!(app.images.width, 0);
+        press(&mut app, KeyCode::Esc);
+        assert!(matches!(app.mode, Mode::List));
+    }
+
+    #[test]
     fn editor_keeps_changes_on_disk() {
         let dir = std::env::temp_dir().join(format!("backlog-test-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join(".backlog.md");
         fs::write(&path, "# Backlog\n\n## #1 First\nstatus: open\n").unwrap();
-        let mut app = App::new(Backlog::load(&path).unwrap(), Picker::halfblocks());
+        let mut app = App::new(
+            Backlog::load(&path).unwrap(),
+            Picker::halfblocks(),
+            Settings::defaults(),
+        );
         app.mode = Mode::PromptExternal;
 
         // Another program changes the file while the editor runs.

@@ -6,6 +6,7 @@ mod images;
 mod input;
 mod markdown;
 mod prompt;
+mod settings;
 mod textarea;
 mod ui;
 
@@ -80,7 +81,7 @@ fn run() -> io::Result<()> {
     // Ask the terminal for its graphics protocol and font size; without an
     // answer, draw the images with half blocks.
     let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
-    let mut app = App::new(backlog, picker);
+    let mut app = App::new(backlog, picker, settings::Settings::load());
     let _ = execute!(io::stdout(), EnableMouseCapture, EnableBracketedPaste);
     let result = event_loop(&mut terminal, &mut app);
     let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);

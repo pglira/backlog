@@ -35,9 +35,6 @@ const MIME_TYPES: [(&str, &str); 4] = [
     ("image/webp", "webp"),
 ];
 const EXTENSIONS: [&str; 5] = ["png", "jpg", "jpeg", "gif", "webp"];
-/// The width of an image in cells. Images are previews; the agent reads the
-/// files.
-pub const WIDTH: u16 = 20;
 /// The maximum number of prepared images in the cache.
 const CACHE_SIZE: usize = 64;
 
@@ -153,16 +150,20 @@ pub struct Images {
     /// The images of the current frame that carry escape sequences in a
     /// cell: the key, the position and the content of the cell.
     sent: RefCell<Vec<(Key, Position, String)>>,
+    /// The width of the previews in cells. Images are previews; the agent
+    /// reads the files. With 0, the images show only as their alt text.
+    pub width: u16,
 }
 
 impl Images {
-    pub fn new(picker: Picker, base: PathBuf) -> Images {
+    pub fn new(picker: Picker, base: PathBuf, width: u16) -> Images {
         Images {
             picker,
             base,
             decoded: RefCell::default(),
             prepared: RefCell::default(),
             sent: RefCell::default(),
+            width,
         }
     }
 

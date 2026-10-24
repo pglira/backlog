@@ -52,8 +52,8 @@ path, also inserts the image. `backlog` copies the image to
 hash of the content.
 
 The rendered fields show each image below its line, as a small preview
-20 cells wide. An agent reads the image files. `backlog` uses the
-kitty, iTerm2 or sixel graphics protocol when the terminal supports one,
+20 cells wide (see the settings). An agent reads the image files.
+`backlog` uses the kitty, iTerm2 or sixel graphics protocol when the terminal supports one,
 and Unicode half blocks if not. Remove the link to remove an image from a
 field; `backlog` does not delete the image files.
 
@@ -72,8 +72,24 @@ Press `?` for all keys.
 | `P`               | edit the agent prompt              |
 | `E`               | edit the agent prompt in `$EDITOR` |
 | `p`               | show / hide the details            |
+| `S`               | settings                           |
 | `/`               | search                             |
 | `q`               | quit                               |
+
+`S` opens the settings. `space` toggles the selected setting, and `h` /
+`l` change a number. `backlog` saves each change at once in
+`backlog/config.toml` in `$XDG_CONFIG_HOME` (default `~/.config`):
+
+```toml
+details = true       # show the details at start
+split = 45           # size of the list, in percent (10 to 90)
+hide_closed = false  # hide done and cancelled issues
+newest_first = false # show the newest issues first
+images = true        # show image previews
+image_width = 20     # width of the image previews, in cells (10 to 60)
+```
+
+A drag of the border between the list and the details also saves `split`.
 
 `y` copies a prompt such as `Work on issue #3 "..." from the backlog file
 /path/.backlog.md. ...` to the clipboard. The prompt also asks the agent to

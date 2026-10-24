@@ -11,9 +11,10 @@ use ratatui::widgets::{
 
 use crate::app::{App, FIELD_NAMES, Form, Mode};
 use crate::backlog::{Issue, Status};
-use crate::images::{self, Images};
+use crate::images::Images;
 use crate::input::LineEdit;
 use crate::markdown::{self, Rendered};
+use crate::settings::{Kind, SETTINGS, Settings};
 use crate::textarea::{TextArea, VimMode};
 
 // Dracula palette, https://draculatheme.com/contribute
@@ -97,6 +98,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Mode::Form(form) => draw_form(f, form, &app.images, body),
         Mode::ConfirmDelete(id) => draw_confirm(f, &format!("Delete #{id} permanently?"), body),
         Mode::Help => draw_help(f, body),
+        Mode::Settings(sel) => draw_settings(f, &app.settings, *sel, body),
         Mode::Prompt(edit) => draw_prompt(f, edit, body),
         Mode::Search(edit) => draw_search(f, edit, search),
         Mode::List | Mode::PromptExternal => {}
@@ -286,19 +288,25 @@ struct RichText {
 
 impl RichText {
     /// Wrap `r` to `width` and make room for the images, each scaled to
-    /// `images::WIDTH` cells, or to `width` if that is less. An image that
-    /// cannot be read shows only as its alt text.
+    /// `images.width` cells, or to `width` if that is less. An image that
+    /// cannot be read, or any image if `images.width` is 0, shows only as its
+    /// alt text.
     fn new(r: Rendered, images: &Images, width: u16) -> RichText {
         let mut text = RichText {
             lines: Vec::new(),
             images: Vec::new(),
-            image_width: images::WIDTH.min(width),
+            image_width: images.width.min(width),
             rows: 0,
         };
         if width == 0 {
             return text;
         }
-        let mut pending = r.images.into_iter().peekable();
+        let shown = if text.image_width == 0 {
+            Vec::new()
+        } else {
+            r.images
+        };
+        let mut pending = shown.into_iter().peekable();
         for (n, line) in r.lines.into_iter().enumerate() {
             text.rows += Paragraph::new(line.clone())
                 .wrap(Wrap { trim: false })
@@ -544,6 +552,39 @@ fn draw_confirm(f: &mut Frame, question: &str, area: Rect) {
     f.render_widget(Paragraph::new(text).centered().block(b), area);
 }
 
+fn draw_settings(f: &mut Frame, settings: &Settings, sel: usize, area: Rect) {
+    let mut lines: Vec<Line> = SETTINGS
+        .iter()
+        .enumerate()
+        .map(|(n, t)| {
+            let (mark, color) = match t.kind {
+                Kind::Toggle if settings.is_on(n) => ("[x]".to_string(), GREEN),
+                Kind::Toggle => ("[ ]".to_string(), COMMENT),
+                Kind::Number { unit, .. } => (format!("{}{unit}", settings.get(n)), CYAN),
+            };
+            let style = if n == sel {
+                Style::new().bg(CURRENT).bold()
+            } else {
+                Style::new()
+            };
+            Line::from(vec![
+                Span::styled(format!(" {mark:<9}"), style.fg(color)),
+                Span::styled(format!("{} ", t.label), style),
+            ])
+        })
+        .collect();
+    lines.push(Line::raw(""));
+    lines.push(hints(&[
+        ("space", "toggle"),
+        ("h l", "change"),
+        ("esc", "close"),
+    ]));
+    let width = lines.iter().map(Line::width).max().unwrap_or(0) as u16 + 4;
+    let area = popup(area, width.max(30), lines.len() as u16 + 2);
+    f.render_widget(Clear, area);
+    f.render_widget(Paragraph::new(lines).block(block("Settings", true)), area);
+}
+
 type KeyHelp = &'static [(&'static str, &'static [(&'static str, &'static str)])];
 
 fn help_lines(sections: KeyHelp) -> Vec<Line<'static>> {
@@ -579,6 +620,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
                 ("P", "edit the agent prompt"),
                 ("E", "edit the agent prompt in $EDITOR"),
                 ("p", "show / hide details"),
+                ("S", "settings"),
                 ("/ esc", "search / clear search"),
                 ("q", "quit"),
             ],
@@ -668,7 +710,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let img = image::RgbImage::from_pixel(40, 40, image::Rgb([255, 0, 0]));
         img.save(dir.join("red.png")).unwrap();
-        let images = Images::new(Picker::halfblocks(), dir.clone());
+        let images = Images::new(Picker::halfblocks(), dir.clone(), 20);
 
         let r = markdown::render("a ![Image #1](red.png)\nb ![x](missing.png)", Style::new());
         let text = RichText::new(r, &images, 20);
