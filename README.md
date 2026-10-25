@@ -15,10 +15,9 @@ If the file does not exist, `backlog` asks to create it.
 When another program changes the file, `backlog` reads it again. Drag the
 border between the list and the details with the mouse to resize them.
 
-Each issue has an id, a title, a description, a "done when" condition,
-notes, an outcome (a short summary of the work), and a status: `open`,
-`active`, `done` or `cancelled`. The file is plain Markdown and is written
-after each change. The fields show Markdown (headings, lists, task lists,
+Each issue has an id, a title, a description, notes, an outcome (a short
+summary of the work), and a status: `open`, `active`, `done` or `cancelled`.
+The file is plain Markdown and is written after each change. The fields show Markdown (headings, lists, task lists,
 quotes, tables, code, **bold**, *italic*, links, images) rendered; a field in edit shows
 the raw text:
 
@@ -29,10 +28,7 @@ the raw text:
 status: active
 
 ### Description
-The session expires after 5 minutes.
-
-### Done when
-A user stays logged in for 8 hours.
+The session expires after 5 minutes. A user must stay logged in for 8 hours.
 
 ### Notes
 The timeout is set in `config/session.toml`.

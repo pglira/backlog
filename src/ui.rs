@@ -280,7 +280,6 @@ fn draw_detail(
         Line::raw(""),
     ]);
     r.extend(section("Description", &i.description));
-    r.extend(section("Done when", &i.done_when));
     r.extend(section("Notes", &i.notes));
     r.extend(section("Outcome", &i.outcome));
     if !show_images {
@@ -427,19 +426,17 @@ fn form_area(body: Rect) -> Rect {
 
 /// The areas of the form fields, with their borders, for the main area `body`.
 /// The left half holds one text row for the title, 13 for the description,
-/// two for the "done when" condition, and the rest for the notes. The outcome
-/// takes the right half.
-pub fn form_fields(body: Rect) -> [Rect; 5] {
+/// and the rest for the notes. The outcome takes the right half.
+pub fn form_fields(body: Rect) -> [Rect; 4] {
     let [left, outcome] = Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)])
         .areas(form_area(body).inner(Margin::new(1, 1)));
-    let [title, description, done_when, notes] = Layout::vertical([
+    let [title, description, notes] = Layout::vertical([
         Constraint::Length(3),
         Constraint::Length(15),
-        Constraint::Length(4),
         Constraint::Fill(1),
     ])
     .areas(left);
-    [title, description, done_when, notes, outcome]
+    [title, description, notes, outcome]
 }
 
 /// Draw a vertical scroll bar on the right border of `area` when `total`

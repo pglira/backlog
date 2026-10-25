@@ -14,9 +14,6 @@
 //! ### Description
 //! Free text.
 //!
-//! ### Done when
-//! Free text.
-//!
 //! ### Notes
 //! Free text.
 //!
@@ -72,7 +69,6 @@ pub struct Issue {
     pub title: String,
     pub status: Status,
     pub description: String,
-    pub done_when: String,
     pub notes: String,
     pub outcome: String,
 }
@@ -161,7 +157,6 @@ impl Backlog {
             ));
             for (name, body) in [
                 ("Description", &i.description),
-                ("Done when", &i.done_when),
                 ("Notes", &i.notes),
                 ("Outcome", &i.outcome),
             ] {
@@ -215,7 +210,6 @@ fn parse(text: &str) -> (String, Vec<Issue>) {
     enum Section {
         None,
         Description,
-        DoneWhen,
         Notes,
         Outcome,
     }
@@ -231,7 +225,6 @@ fn parse(text: &str) -> (String, Vec<Issue>) {
                 title,
                 status: Status::Open,
                 description: String::new(),
-                done_when: String::new(),
                 notes: String::new(),
                 outcome: String::new(),
             });
@@ -248,7 +241,6 @@ fn parse(text: &str) -> (String, Vec<Issue>) {
         if let Some(name) = line.strip_prefix("### ") {
             let next = match name.trim().to_lowercase().as_str() {
                 "description" => Some(Section::Description),
-                "done when" => Some(Section::DoneWhen),
                 "notes" => Some(Section::Notes),
                 "outcome" => Some(Section::Outcome),
                 _ => None,
@@ -260,7 +252,6 @@ fn parse(text: &str) -> (String, Vec<Issue>) {
         }
         let body = match section {
             Section::Description => &mut issue.description,
-            Section::DoneWhen => &mut issue.done_when,
             Section::Notes => &mut issue.notes,
             Section::Outcome => &mut issue.outcome,
             Section::None => {
@@ -275,12 +266,7 @@ fn parse(text: &str) -> (String, Vec<Issue>) {
     }
 
     for issue in &mut issues {
-        for body in [
-            &mut issue.description,
-            &mut issue.done_when,
-            &mut issue.notes,
-            &mut issue.outcome,
-        ] {
+        for body in [&mut issue.description, &mut issue.notes, &mut issue.outcome] {
             *body = body.trim_matches('\n').to_string();
         }
     }
@@ -311,15 +297,22 @@ mod tests {
     }
 
     #[test]
+    fn unknown_section_stays_in_field() {
+        let text =
+            "## #1 First\nstatus: open\n\n### Description\nDo it.\n\n### Done when\nit works\n";
+        let (_, issues) = parse(text);
+        assert_eq!(issues[0].description, "Do it.\n\n### Done when\nit works");
+    }
+
+    #[test]
     fn round_trip() {
-        let text = "# Backlog\n\nNotes.\n\n## Agent prompt\nDo #{id}.\n\n## #1 First\nstatus: done\n\n### Description\nline 1\n\nline 2\n\n### Done when\nit works\n\n### Notes\nsee #4\n\n### Outcome\n### Changes\n- fixed\n\n## #4 Second\nstatus: open\n";
+        let text = "# Backlog\n\nNotes.\n\n## Agent prompt\nDo #{id}.\n\n## #1 First\nstatus: done\n\n### Description\nline 1\n\nline 2\n\n### Notes\nsee #4\n\n### Outcome\n### Changes\n- fixed\n\n## #4 Second\nstatus: open\n";
         let (preamble, issues) = parse(text);
         let (preamble, prompt) = split_prompt(&preamble);
         assert_eq!(prompt.as_deref(), Some("Do #{id}."));
         assert_eq!(issues.len(), 2);
         assert_eq!(issues[0].status, Status::Done);
         assert_eq!(issues[0].description, "line 1\n\nline 2");
-        assert_eq!(issues[0].done_when, "it works");
         assert_eq!(issues[0].notes, "see #4");
         assert_eq!(issues[0].outcome, "### Changes\n- fixed");
         assert_eq!(issues[1].id, 4);

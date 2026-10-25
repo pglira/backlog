@@ -16,11 +16,11 @@ use crate::settings::{self, Settings};
 use crate::textarea::TextArea;
 use crate::ui;
 
-pub const FIELD_NAMES: [&str; 5] = ["Title", "Description", "Done when", "Notes", "Outcome"];
+pub const FIELD_NAMES: [&str; 4] = ["Title", "Description", "Notes", "Outcome"];
 const TITLE: usize = 0;
 const DESCRIPTION: usize = 1;
 /// The outcome takes the right half of the form; the other fields are on the left.
-const OUTCOME: usize = 4;
+const OUTCOME: usize = 3;
 /// Minimum width of the main area for the list and the details side by side.
 const WIDE: u16 = 90;
 /// Minimum size of a pane along the split direction.
@@ -50,14 +50,14 @@ pub enum Mode {
 /// The editor for one issue. `id` is `None` for a new issue.
 pub struct Form {
     pub id: Option<u32>,
-    pub fields: [String; 5],
-    orig: [String; 5],
+    pub fields: [String; 4],
+    orig: [String; 4],
     pub sel: usize,
     pub edit: Option<TextArea>,
     pub confirm_discard: bool,
     /// The first visible row of each field that is not in edit. The draw
     /// clamps it to the length of the text.
-    pub scroll: [Cell<u16>; 5],
+    pub scroll: [Cell<u16>; 4],
     /// The field on the left that `h` goes back to from the outcome.
     left: usize,
 }
@@ -538,7 +538,7 @@ impl App {
             .filter(|(_, i)| !(hide_closed && matches!(i.status, Status::Done | Status::Cancelled)))
             .filter(|(_, i)| {
                 query.is_empty()
-                    || [&i.title, &i.description, &i.done_when, &i.notes, &i.outcome]
+                    || [&i.title, &i.description, &i.notes, &i.outcome]
                         .iter()
                         .any(|s| s.to_lowercase().contains(&query))
             })
@@ -802,7 +802,6 @@ impl App {
         let fields = [
             i.title.clone(),
             i.description.clone(),
-            i.done_when.clone(),
             i.notes.clone(),
             i.outcome.clone(),
         ];
@@ -898,14 +897,13 @@ impl App {
             self.mode = Mode::Form(form);
             return Effect::None;
         }
-        let [title, description, done_when, notes, outcome] = form.fields;
+        let [title, description, notes, outcome] = form.fields;
         let id = match form.id {
             Some(id) => {
                 if let Some(i) = self.backlog.issues.iter_mut().find(|i| i.id == id) {
                     *i = Issue {
                         title,
                         description,
-                        done_when,
                         notes,
                         outcome,
                         ..i.clone()
@@ -920,7 +918,6 @@ impl App {
                     id,
                     title,
                     description,
-                    done_when,
                     notes,
                     outcome,
                     status: Status::Open,

@@ -5,8 +5,7 @@
 //! and `{path}` in the template are replaced by the values of the issue.
 
 pub const DEFAULT: &str = "Work on issue #{id} \"{title}\" from the backlog file {path}. \
-Read the issue there first: its description says what to do, \
-and its \"Done when\" section (if present) says when the work is complete. \
+Read the issue there first: its description says what to do. \
 Before you start, set the status line of the issue to \"status: active\". \
 If the issue has no title, also give it a short title (20 characters at most) \
 from its description, in the heading line \"## #{id} <title>\". \
