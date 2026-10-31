@@ -114,6 +114,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     match &app.mode {
         Mode::Form(form) => draw_form(f, form, &app.images, body),
         Mode::ConfirmDelete(id) => draw_confirm(f, &format!("Delete #{id} permanently?"), body),
+        Mode::ConfirmRestore => draw_confirm(f, "Restore the default agent prompt?", body),
         Mode::Help => draw_help(f, body),
         Mode::Settings(sel) => draw_settings(f, &app.settings, *sel, body),
         Mode::Prompt(edit) => draw_prompt(f, edit, body),
@@ -633,6 +634,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
                 ("y", "copy a prompt for an agent"),
                 ("P", "edit the agent prompt"),
                 ("E", "edit the agent prompt in $EDITOR"),
+                ("R", "restore the default agent prompt"),
                 ("p", "show / hide details"),
                 ("S", "settings"),
                 ("/ esc", "search / clear search"),

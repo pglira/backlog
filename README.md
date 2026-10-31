@@ -67,6 +67,7 @@ Press `?` for all keys.
 | `y`               | copy a prompt for an agent         |
 | `P`               | edit the agent prompt              |
 | `E`               | edit the agent prompt in `$EDITOR` |
+| `R`               | restore the default agent prompt   |
 | `p`               | show / hide the details            |
 | `S`               | settings                           |
 | `/`               | search                             |
@@ -106,7 +107,8 @@ in normal mode saves it. `E` edits the template in `$VISUAL` or `$EDITOR`
 and saves it when the editor exits. `{id}`, `{title}` and `{path}` in the template are
 replaced by the values of the issue. An edited template is stored in the
 `## Agent prompt` section at the top of `.backlog.md`; an empty template, or
-one equal to the built-in default, removes the section.
+one equal to the built-in default, removes the section. `R` restores the
+built-in default after a confirmation and removes the section.
 
 In the form, `i` edits a field inline and `e` edits it in `$VISUAL` or
 `$EDITOR`. `w` saves. Inline editing has Vim modes: it starts in insert

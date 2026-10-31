@@ -38,6 +38,8 @@ pub enum Mode {
     Search(LineEdit),
     Form(Box<Form>),
     ConfirmDelete(u32),
+    /// Ask before the default agent prompt replaces the edited template.
+    ConfirmRestore,
     Help,
     /// Edit the template of the agent prompt.
     Prompt(TextArea),
@@ -499,13 +501,13 @@ impl App {
         Some(prompt::fill(template, i.id, &i.title, &path))
     }
 
-    /// Keep the edited prompt template in the backlog file. An empty
-    /// template, or one equal to the default, removes it from the file.
     /// The template of the agent prompt.
     fn template(&self) -> &str {
         self.backlog.prompt.as_deref().unwrap_or(prompt::DEFAULT)
     }
 
+    /// Keep the edited prompt template in the backlog file. An empty
+    /// template, or one equal to the default, removes it from the file.
     fn save_prompt(&mut self, text: &str) {
         let text = text.trim();
         self.backlog.prompt = if text.is_empty() || text == prompt::DEFAULT {
@@ -597,6 +599,14 @@ impl App {
                     self.message = Some(format!("Deleted #{id}"));
                     self.save();
                     self.clamp_cursor();
+                }
+                Effect::None
+            }
+            Mode::ConfirmRestore => {
+                if key.code == KeyCode::Char('y') {
+                    self.backlog.prompt = None;
+                    self.message = Some("Restored the default agent prompt".into());
+                    self.save();
                 }
                 Effect::None
             }
@@ -700,6 +710,8 @@ impl App {
                     single_line: false,
                 };
             }
+            KeyCode::Char('R') if self.backlog.prompt.is_some() => self.mode = Mode::ConfirmRestore,
+            KeyCode::Char('R') => self.message = Some("The agent prompt is the default".into()),
 
             KeyCode::Char('/') => self.mode = Mode::Search(LineEdit::new(&self.query)),
             KeyCode::Esc => self.query.clear(),
@@ -1052,5 +1064,38 @@ mod tests {
         assert_eq!(saved.prompt.as_deref(), Some("Do #{id}."));
         assert_eq!(saved.issues.len(), 2);
         assert_eq!(saved.issues[0].status, Status::Done);
+    }
+
+    #[test]
+    fn restore_default_prompt() {
+        let dir = std::env::temp_dir().join(format!("backlog-restore-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".backlog.md");
+        let text = "# Backlog\n\n## Agent prompt\nDo #{id}.\n\n## #1 First\nstatus: open\n";
+        fs::write(&path, text).unwrap();
+        let mut app = App::new(
+            Backlog::load(&path).unwrap(),
+            Picker::halfblocks(),
+            Settings::defaults(),
+        );
+        let press = |app: &mut App, c: char| {
+            app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        };
+
+        press(&mut app, 'R');
+        press(&mut app, 'n');
+        assert!(matches!(app.mode, Mode::List));
+        assert_eq!(app.template(), "Do #{id}.");
+
+        press(&mut app, 'R');
+        assert!(matches!(app.mode, Mode::ConfirmRestore));
+        press(&mut app, 'y');
+        assert_eq!(app.template(), prompt::DEFAULT);
+        let saved = Backlog::load(&path).unwrap();
+        assert_eq!(saved.prompt, None);
+
+        press(&mut app, 'R');
+        assert!(matches!(app.mode, Mode::List));
+        fs::remove_dir_all(&dir).unwrap();
     }
 }
