@@ -660,6 +660,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
                 ("e", "edit field in $EDITOR"),
                 ("ctrl-e ctrl-y", "scroll field down / up"),
                 ("w ctrl-s", "save"),
+                ("Y", "save and copy a prompt for an agent"),
                 ("esc q", "cancel"),
             ],
         ),

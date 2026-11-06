@@ -495,7 +495,12 @@ impl App {
 
     /// The prompt for a coding agent to work on the selected issue.
     fn agent_instruction(&self) -> Option<String> {
-        let i = self.selected()?;
+        self.agent_instruction_for(self.selected()?.id)
+    }
+
+    /// The prompt for a coding agent to work on the issue `id`.
+    fn agent_instruction_for(&self, id: u32) -> Option<String> {
+        let i = self.backlog.issues.iter().find(|i| i.id == id)?;
         let template = self.template();
         let path = self.backlog.path.display().to_string();
         Some(prompt::fill(template, i.id, &i.title, &path))
@@ -882,8 +887,20 @@ impl App {
                 KeyCode::Char('E') | KeyCode::Char('e') => {
                     effect = form.external(form.fields[form.sel].clone())
                 }
-                KeyCode::Char('w') => return self.submit(form),
-                KeyCode::Char('s') if ctrl => return self.submit(form),
+                KeyCode::Char('w') => {
+                    self.submit(form);
+                    return Effect::None;
+                }
+                KeyCode::Char('s') if ctrl => {
+                    self.submit(form);
+                    return Effect::None;
+                }
+                KeyCode::Char('Y') => {
+                    return self
+                        .submit(form)
+                        .and_then(|id| self.agent_instruction_for(id))
+                        .map_or(Effect::None, Effect::Copy);
+                }
                 KeyCode::Esc | KeyCode::Char('q') => {
                     if !form.is_dirty() {
                         return Effect::None;
@@ -897,7 +914,9 @@ impl App {
         effect
     }
 
-    fn submit(&mut self, mut form: Box<Form>) -> Effect {
+    /// Save the form to the backlog and return the id of the issue. An
+    /// invalid form stays open and gives `None`.
+    fn submit(&mut self, mut form: Box<Form>) -> Option<u32> {
         for f in &mut form.fields {
             *f = f.trim().to_string();
         }
@@ -907,7 +926,7 @@ impl App {
             self.message = Some("Enter a title or a description".into());
             form.sel = TITLE;
             self.mode = Mode::Form(form);
-            return Effect::None;
+            return None;
         }
         let [title, description, notes, outcome] = form.fields;
         let id = match form.id {
@@ -941,7 +960,7 @@ impl App {
         };
         self.save();
         self.select_id(id);
-        Effect::None
+        Some(id)
     }
 }
 
@@ -949,6 +968,39 @@ impl App {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn form_save_and_copy() {
+        let dir = std::env::temp_dir().join(format!("backlog-yank-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".backlog.md");
+        fs::write(&path, "# Backlog\n\n## #1 First\nstatus: open\n").unwrap();
+        let mut app = App::new(
+            Backlog::load(&path).unwrap(),
+            Picker::halfblocks(),
+            Settings::defaults(),
+        );
+        let press = |app: &mut App, c: char| {
+            app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
+        };
+
+        // An empty new issue stays in the form and copies nothing.
+        press(&mut app, 'a');
+        assert!(matches!(press(&mut app, 'Y'), Effect::None));
+        assert!(matches!(app.mode, Mode::Form(_)));
+
+        if let Mode::Form(form) = &mut app.mode {
+            form.fields[TITLE] = "Second".into();
+        }
+        let Effect::Copy(text) = press(&mut app, 'Y') else {
+            panic!("expected a copy");
+        };
+        assert!(text.contains("#2 \"Second\""), "{text}");
+        assert!(matches!(app.mode, Mode::List));
+        assert_eq!(app.selected().unwrap().id, 2);
+        assert!(fs::read_to_string(&path).unwrap().contains("## #2 Second"));
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn form_columns() {

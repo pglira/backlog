@@ -111,7 +111,8 @@ one equal to the built-in default, removes the section. `R` restores the
 built-in default after a confirmation and removes the section.
 
 In the form, `i` edits a field inline and `e` edits it in `$VISUAL` or
-`$EDITOR`. `w` saves. Inline editing has Vim modes: it starts in insert
+`$EDITOR`. `w` saves. `Y` saves and copies the agent prompt for the
+issue, as `y` does in the list. Inline editing has Vim modes: it starts in insert
 mode, which also takes readline keys (`ctrl-a`, `ctrl-e`, `ctrl-w`,
 `ctrl-k`, `alt-b`, ...). `esc` goes to normal mode (`hjkl`, `w`, `b`,
 `dd`, `cw`, `p`, `u`, ...), and a second `esc` stops editing the field.
