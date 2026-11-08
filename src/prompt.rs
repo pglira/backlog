@@ -5,7 +5,10 @@
 //! and `{path}` in the template are replaced by the values of the issue.
 
 pub const DEFAULT: &str = "Work on issue #{id} \"{title}\" from the backlog file {path}. \
-Read the issue there first: its description says what to do. \
+Read only this issue, not the rest of the file: \
+`awk '/^## /{p=($2==\"#{id}\")} p{print NR\": \"$0}' \"{path}\"` \
+prints its lines with line numbers. Its description says what to do. \
+Edit only the lines of this issue. \
 Before you start, set the status line of the issue to \"status: active\". \
 If the issue has no title, also give it a short title (20 characters at most) \
 from its description, in the heading line \"## #{id} <title>\". \
@@ -28,4 +31,16 @@ pub fn fill(template: &str, id: u32, title: &str, path: &str) -> String {
         .replace("{id}", &id.to_string())
         .replace("{title}", title)
         .replace("{path}", path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_prompt_reads_only_the_issue() {
+        let text = fill(DEFAULT, 22, "", "/tmp/b.md");
+        assert!(text.contains(r##"awk '/^## /{p=($2=="#22")} p{print NR": "$0}' "/tmp/b.md""##));
+        assert!(text.contains("\"(no title)\""));
+    }
 }
