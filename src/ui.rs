@@ -16,7 +16,7 @@ use crate::images::Images;
 use crate::input::LineEdit;
 use crate::markdown::{self, Rendered};
 use crate::settings::{self, Kind, SETTINGS, Settings};
-use crate::textarea::{TextArea, VimMode};
+use crate::textarea::TextArea;
 
 // Dracula palette, https://draculatheme.com/contribute
 pub const BG: Color = Color::Rgb(0x28, 0x2a, 0x36);
@@ -489,19 +489,12 @@ fn draw_form(f: &mut Frame, form: &Form, images: &Images, body: Rect) {
             (true, false) => ACCENT,
             _ => COMMENT,
         };
-        let mode = match &form.edit {
-            Some(edit) if editing => match edit.mode {
-                VimMode::Insert => " · INSERT",
-                VimMode::Normal => " · NORMAL",
-            },
-            _ => "",
-        };
         let b = Block::bordered()
             .border_type(border_type())
             .style(Style::new().fg(FG).bg(BG))
             .border_style(Style::new().fg(color))
             .title(Span::styled(
-                format!(" {}{mode} ", FIELD_NAMES[n]),
+                format!(" {} ", FIELD_NAMES[n]),
                 Style::new().fg(color).bold(),
             ));
         let content = b.inner(rect);
@@ -541,11 +534,7 @@ pub fn prompt_area(body: Rect) -> Rect {
 fn draw_prompt(f: &mut Frame, edit: &TextArea, body: Rect) {
     let area = prompt_area(body);
     f.render_widget(Clear, area);
-    let mode = match edit.mode {
-        VimMode::Insert => "INSERT",
-        VimMode::Normal => "NORMAL",
-    };
-    let b = block(&format!("Agent prompt · {mode}"), true)
+    let b = block("Agent prompt", true)
         .border_style(Style::new().fg(EDITING))
         .title_bottom(
             Line::from(" {id} {title} {path} are replaced · empty: default ")
@@ -665,43 +654,22 @@ fn draw_help(f: &mut Frame, area: Rect) {
             ],
         ),
     ];
-    const RIGHT: KeyHelp = &[
-        (
-            "Field: insert mode",
-            &[
-                ("esc", "normal mode"),
-                ("enter", "new line (title: next field)"),
-                ("ctrl-a ctrl-e", "start / end of line"),
-                ("ctrl-b ctrl-f", "character left / right"),
-                ("alt-b alt-f", "word left / right"),
-                ("ctrl-w alt-d", "cut word before / after"),
-                ("ctrl-u ctrl-k", "cut to start / end"),
-                ("ctrl-y", "paste cut text"),
-            ],
-        ),
-        (
-            "Field: normal mode",
-            &[
-                ("h j k l w b e", "move"),
-                ("0 ^ $ gg G", "line start / end, first / last line"),
-                ("i a I A o O", "insert mode"),
-                ("x dd D dw d$", "delete"),
-                ("cw cc C s S", "change"),
-                ("yy yw p P", "copy / paste"),
-                ("J r<char>", "join lines / replace character"),
-                ("u ctrl-r", "undo / redo"),
-                ("esc", "stop editing the field"),
-            ],
-        ),
-        (
-            "Field: both modes",
-            &[
-                ("ctrl-x ctrl-e", "continue in $EDITOR"),
-                ("ctrl-v", "paste an image (not in the title)"),
-                ("ctrl-c", "discard the changes"),
-            ],
-        ),
-    ];
+    const RIGHT: KeyHelp = &[(
+        "Field",
+        &[
+            ("enter", "new line (title: next field)"),
+            ("ctrl-a ctrl-e", "start / end of line"),
+            ("ctrl-b ctrl-f", "character left / right"),
+            ("alt-b alt-f", "word left / right"),
+            ("ctrl-w alt-d", "cut word before / after"),
+            ("ctrl-u ctrl-k", "cut to start / end"),
+            ("ctrl-y", "paste cut text"),
+            ("ctrl-x ctrl-e", "continue in $EDITOR"),
+            ("ctrl-v", "paste an image (not in the title)"),
+            ("esc", "stop editing the field"),
+            ("ctrl-c", "discard the changes"),
+        ],
+    )];
     let (left, right) = (help_lines(LEFT), help_lines(RIGHT));
     let height = left.len().max(right.len()) as u16 + 2;
     let area = popup(area, 108, height);

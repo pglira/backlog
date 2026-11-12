@@ -102,8 +102,8 @@ An issue can have no title, but then it needs a description. The list
 shows it as "(no title)" with the start of the description, and the prompt
 asks the agent to give it a short title (20 characters at most).
 
-`P` edits the prompt template in the same Vim editor as the fields; `esc`
-in normal mode saves it. `E` edits the template in `$VISUAL` or `$EDITOR`
+`P` edits the prompt template in the same editor as the fields; `esc`
+saves it. `E` edits the template in `$VISUAL` or `$EDITOR`
 and saves it when the editor exits. `{id}`, `{title}` and `{path}` in the template are
 replaced by the values of the issue. An edited template is stored in the
 `## Agent prompt` section at the top of `.backlog.md`; an empty template, or
@@ -112,11 +112,9 @@ built-in default after a confirmation and removes the section.
 
 In the form, `i` edits a field inline and `e` edits it in `$VISUAL` or
 `$EDITOR`. `w` saves. `Y` saves and copies the agent prompt for the
-issue, as `y` does in the list. Inline editing has Vim modes: it starts in insert
-mode, which also takes readline keys (`ctrl-a`, `ctrl-e`, `ctrl-w`,
-`ctrl-k`, `alt-b`, ...). `esc` goes to normal mode (`hjkl`, `w`, `b`,
-`dd`, `cw`, `p`, `u`, ...), and a second `esc` stops editing the field.
-`ctrl-x ctrl-e` continues in `$EDITOR`.
+issue, as `y` does in the list. Inline editing takes readline keys
+(`ctrl-a`, `ctrl-e`, `ctrl-w`, `ctrl-k`, `alt-b`, ...), and `esc` stops
+editing the field. `ctrl-x ctrl-e` continues in `$EDITOR`, for example in Vim.
 
 The form shows the outcome in its right half. A field with more text than
 space shows a scroll bar; the mouse wheel or `ctrl-e` / `ctrl-y` scroll it.
