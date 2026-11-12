@@ -108,7 +108,14 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             app.mode,
             Mode::List | Mode::Search(_) | Mode::PromptExternal
         );
-        draw_detail(f, app.selected(), &app.images, show, detail_area);
+        draw_detail(
+            f,
+            app.selected(),
+            &app.images,
+            show,
+            &app.detail_scroll,
+            detail_area,
+        );
     }
 
     match &app.mode {
@@ -259,13 +266,15 @@ fn section(name: &'static str, body: &str) -> Rendered {
     r
 }
 
-/// Draw the details of `issue`. Without `show_images`, the images show only
-/// as their alt text.
+/// Draw the details of `issue` from the row in `scroll` on, with a scroll
+/// bar. The details of another issue than the one in `scroll` start at the
+/// top. Without `show_images`, the images show only as their alt text.
 fn draw_detail(
     f: &mut Frame,
     issue: Option<&Issue>,
     images: &Images,
     show_images: bool,
+    scroll: &Cell<(Option<u32>, u16)>,
     area: Rect,
 ) {
     let Some(i) = issue else {
@@ -289,7 +298,16 @@ fn draw_detail(
     let b = block(&format!("#{}", i.id), false);
     let inner = b.inner(area);
     f.render_widget(b, area);
-    RichText::new(r, images, inner.width).draw(f, images, inner, 0);
+    let text = RichText::new(r, images, inner.width);
+    let total = text.rows;
+    let max = total.saturating_sub(inner.height as usize) as u16;
+    let offset = match scroll.get() {
+        (Some(id), row) if id == i.id => row.min(max),
+        _ => 0,
+    };
+    scroll.set((Some(i.id), offset));
+    text.draw(f, images, inner, offset);
+    draw_scrollbar(f, area, total, offset as usize, FG);
 }
 
 /// Rendered Markdown wrapped to a width, with empty rows below the lines
@@ -635,7 +653,11 @@ fn draw_help(f: &mut Frame, area: Rect) {
             &[
                 ("click", "select issue or field"),
                 ("double-click", "edit issue or field"),
-                ("wheel", "move down / up; scroll a form field"),
+                (
+                    "wheel",
+                    "move down / up; scroll the details or a form field",
+                ),
+                ("ctrl-e ctrl-y", "scroll the details down / up"),
                 ("drag border", "resize list and details"),
             ],
         ),

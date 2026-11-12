@@ -151,6 +151,10 @@ pub struct App {
     /// The main area and the list area of the last draw.
     body: Rect,
     list_area: Rect,
+    /// The details area of the last draw.
+    detail_area: Rect,
+    /// The issue in the details and the first visible row of its text.
+    pub detail_scroll: Cell<(Option<u32>, u16)>,
     /// The index of the first visible row of the list.
     pub list_offset: usize,
     pub show_details: bool,
@@ -178,6 +182,8 @@ impl App {
             split: settings.get(settings::SPLIT) as f32 / 100.0,
             body: Rect::default(),
             list_area: Rect::default(),
+            detail_area: Rect::default(),
+            detail_scroll: Cell::new((None, 0)),
             list_offset: 0,
             show_details: settings.is_on(settings::DETAILS),
             dragging: false,
@@ -196,6 +202,7 @@ impl App {
         self.body = body;
         let (list, details) = self.split_rects(body);
         self.list_area = list;
+        self.detail_area = details;
         (list, details)
     }
 
@@ -386,7 +393,8 @@ impl App {
     }
 
     /// Click to select an issue, double-click to edit it, scroll to move the
-    /// cursor, and drag the border between the list and the details.
+    /// cursor or to scroll the details under the pointer, and drag the border
+    /// between the list and the details.
     fn list_mouse(&mut self, m: MouseEvent, double: bool) {
         if self.drag_border(m) {
             return;
@@ -403,6 +411,8 @@ impl App {
                     }
                 }
             }
+            MouseEventKind::ScrollDown if self.detail_area.contains(pos) => self.scroll_details(1),
+            MouseEventKind::ScrollUp if self.detail_area.contains(pos) => self.scroll_details(-1),
             MouseEventKind::ScrollDown => {
                 self.cursor += 1;
                 self.clamp_cursor();
@@ -567,6 +577,15 @@ impl App {
         self.backlog.issues.len() - self.visible().len()
     }
 
+    /// Scroll the details by `dir` rows. The details of another issue start
+    /// at the top.
+    fn scroll_details(&self, dir: i32) {
+        let id = self.selected().map(|i| i.id);
+        let (shown, row) = self.detail_scroll.get();
+        let row = if shown == id { row as i32 } else { 0 };
+        self.detail_scroll.set((id, (row + dir).max(0) as u16));
+    }
+
     fn clamp_cursor(&mut self) {
         self.cursor = self.cursor.min(self.visible().len().saturating_sub(1));
     }
@@ -694,6 +713,8 @@ impl App {
             KeyCode::Char('u') if ctrl => self.cursor = self.cursor.saturating_sub(self.page / 2),
             KeyCode::PageDown => self.cursor += self.page,
             KeyCode::PageUp => self.cursor = self.cursor.saturating_sub(self.page),
+            KeyCode::Char('e') if ctrl => self.scroll_details(1),
+            KeyCode::Char('y') if ctrl => self.scroll_details(-1),
 
             KeyCode::Char('a') | KeyCode::Char('o') => self.open_new(),
             KeyCode::Enter | KeyCode::Char('e') | KeyCode::Char('l') => self.open_edit(),
@@ -968,6 +989,47 @@ impl App {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn details_scroll_per_issue() {
+        let dir = std::env::temp_dir().join(format!("backlog-detail-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".backlog.md");
+        fs::write(
+            &path,
+            "# Backlog\n\n## #1 A\nstatus: open\n\n## #2 B\nstatus: open\n",
+        )
+        .unwrap();
+        let mut app = App::new(
+            Backlog::load(&path).unwrap(),
+            Picker::halfblocks(),
+            Settings::defaults(),
+        );
+        app.split_body(Rect::new(0, 0, 200, 40));
+        let wheel = |app: &mut App, kind, column| {
+            app.handle_mouse(MouseEvent {
+                kind,
+                column,
+                row: 5,
+                modifiers: KeyModifiers::NONE,
+            })
+        };
+        let id = app.selected().unwrap().id;
+
+        // The wheel over the details scrolls them and keeps the selection.
+        wheel(&mut app, MouseEventKind::ScrollDown, 199);
+        wheel(&mut app, MouseEventKind::ScrollDown, 199);
+        wheel(&mut app, MouseEventKind::ScrollUp, 199);
+        assert_eq!(app.selected().unwrap().id, id);
+        assert_eq!(app.detail_scroll.get(), (Some(id), 1));
+
+        // The wheel over the list moves the cursor; the next issue starts at the top.
+        wheel(&mut app, MouseEventKind::ScrollDown, 1);
+        assert_ne!(app.selected().unwrap().id, id);
+        app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL));
+        assert_eq!(app.detail_scroll.get().1, 1);
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn form_save_and_copy() {
