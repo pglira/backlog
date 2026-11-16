@@ -238,7 +238,8 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) -> usize {
 }
 
 /// The title of an issue as rendered Markdown. An issue without a title
-/// shows "(no title)" and the start of its description.
+/// shows "(no title)" and the start of its description in italics, with
+/// the same color as a titled issue.
 fn title_spans(i: &Issue, style: Style) -> Vec<Span<'static>> {
     if !i.title.is_empty() {
         return markdown::inline(&i.title, style);
@@ -248,10 +249,10 @@ fn title_spans(i: &Issue, style: Style) -> Vec<Span<'static>> {
     if first.chars().count() > 60 {
         start.push('…');
     }
-    let dim = Style::new().fg(COMMENT).italic();
+    let style = style.italic();
     vec![
-        Span::styled("(no title) ", dim.bold()),
-        Span::styled(start, dim),
+        Span::styled("(no title) ", style.bold()),
+        Span::styled(start, style),
     ]
 }
 
