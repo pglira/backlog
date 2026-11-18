@@ -2,7 +2,7 @@
 name = "backlog"
 version = "0.21.0"
 edition = "2024"
-description = "A TUI to manage the issues in a .backlog.md file"
+description = "A TUI to manage the issues in a .backlog directory, one Markdown file per issue"
 license = "MIT"
 
 [dependencies]

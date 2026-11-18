@@ -8,7 +8,7 @@ use ratatui::widgets::{
     Block, BorderType, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
     ScrollbarOrientation, ScrollbarState, Wrap,
 };
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use crate::app::{App, FIELD_NAMES, Form, Mode};
 use crate::backlog::{Issue, Status};
@@ -120,10 +120,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     match &app.mode {
         Mode::Form(form) => draw_form(f, form, &app.images, body),
-        Mode::ConfirmDelete(id) => draw_confirm(f, &format!("Delete #{id} permanently?"), body),
+        Mode::ConfirmDelete(id) => draw_confirm(f, &format!("Delete {id} permanently?"), body),
         Mode::ConfirmRestore => draw_confirm(f, "Restore the default agent prompt?", body),
         Mode::Help => draw_help(f, body),
-        Mode::Settings(sel) => draw_settings(f, &app.settings, *sel, body),
+        Mode::Settings(sel) => draw_settings(f, &app.settings, *sel, None, body),
+        Mode::Author(edit, _) => {
+            draw_settings(f, &app.settings, settings::AUTHOR, Some(edit), body)
+        }
         Mode::Prompt(edit) => draw_prompt(f, edit, body),
         Mode::Search(edit) => draw_search(f, edit, search),
         Mode::List | Mode::PromptExternal => {}
@@ -138,7 +141,7 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(" backlog ", Style::new().fg(BG).bg(ACCENT).bold()),
         Span::raw(" "),
         Span::styled(
-            app.backlog.path.display().to_string(),
+            app.backlog.dir.display().to_string(),
             Style::new().fg(COMMENT),
         ),
         Span::raw("   "),
@@ -160,15 +163,6 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
 /// Draw the issue list and return the index of its first visible row.
 fn draw_list(f: &mut Frame, app: &App, area: Rect) -> usize {
     let vis = app.visible();
-    let width = app
-        .backlog
-        .issues
-        .iter()
-        .map(|i| i.id)
-        .max()
-        .unwrap_or(1)
-        .to_string()
-        .len();
     let items: Vec<ListItem> = vis
         .iter()
         .map(|&n| {
@@ -181,7 +175,7 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) -> usize {
                 title = title.add_modifier(Modifier::CROSSED_OUT);
             }
             let mut spans = vec![
-                Span::styled(format!(" {:>width$} ", i.id), Style::new().fg(COMMENT)),
+                Span::raw(" "),
                 Span::styled(
                     format!("{} ", status_symbol(i.status)),
                     status_style(i.status),
@@ -275,7 +269,7 @@ fn draw_detail(
     issue: Option<&Issue>,
     images: &Images,
     show_images: bool,
-    scroll: &Cell<(Option<u32>, u16)>,
+    scroll: &RefCell<(Option<String>, u16)>,
     area: Rect,
 ) {
     let Some(i) = issue else {
@@ -288,6 +282,7 @@ fn draw_detail(
             format!("{} {}", status_symbol(i.status), i.status.as_str()),
             status_style(i.status),
         ),
+        Line::styled(issue_dates(i), Style::new().fg(COMMENT)),
         Line::raw(""),
     ]);
     r.extend(section("Description", &i.description));
@@ -296,17 +291,18 @@ fn draw_detail(
     if !show_images {
         r.images.clear();
     }
-    let b = block(&format!("#{}", i.id), false);
+    let b = block(&i.id, false);
     let inner = b.inner(area);
     f.render_widget(b, area);
     let text = RichText::new(r, images, inner.width);
     let total = text.rows;
     let max = total.saturating_sub(inner.height as usize) as u16;
-    let offset = match scroll.get() {
-        (Some(id), row) if id == i.id => row.min(max),
+    let mut scroll = scroll.borrow_mut();
+    let offset = match &*scroll {
+        (Some(id), row) if *id == i.id => (*row).min(max),
         _ => 0,
     };
-    scroll.set((Some(i.id), offset));
+    *scroll = (Some(i.id.clone()), offset);
     text.draw(f, images, inner, offset);
     draw_scrollbar(f, area, total, offset as usize, FG);
 }
@@ -494,8 +490,8 @@ fn draw_text_area(f: &mut Frame, edit: &TextArea, area: Rect, color: Color) {
 fn draw_form(f: &mut Frame, form: &Form, images: &Images, body: Rect) {
     let area = form_area(body);
     f.render_widget(Clear, area);
-    let title = match form.id {
-        Some(id) => format!("Edit #{id}"),
+    let title = match &form.id {
+        Some(id) => format!("Edit {id}"),
         None => "New issue".to_string(),
     };
     f.render_widget(block(&title, true), area);
@@ -575,37 +571,97 @@ fn draw_confirm(f: &mut Frame, question: &str, area: Rect) {
     f.render_widget(Paragraph::new(text).centered().block(b), area);
 }
 
-fn draw_settings(f: &mut Frame, settings: &Settings, sel: usize, area: Rect) {
+/// Draw the settings popup with the setting `sel` selected. `edit` is the
+/// editor of the name of the author, if it is in edit.
+fn draw_settings(
+    f: &mut Frame,
+    settings: &Settings,
+    sel: usize,
+    edit: Option<&LineEdit>,
+    area: Rect,
+) {
     let mut lines: Vec<Line> = SETTINGS
         .iter()
         .enumerate()
         .map(|(n, t)| {
-            let (mark, color) = match t.kind {
-                Kind::Toggle if settings.is_on(n) => ("[x]".to_string(), GREEN),
-                Kind::Toggle => ("[ ]".to_string(), COMMENT),
-                Kind::Number { unit, .. } => (format!("{}{unit}", settings.get(n)), CYAN),
-            };
             let style = if n == sel {
                 Style::new().bg(CURRENT).bold()
             } else {
                 Style::new()
             };
-            Line::from(vec![
-                Span::styled(format!(" {mark:<9}"), style.fg(color)),
-                Span::styled(format!("{} ", t.label), style),
-            ])
+            // A text setting shows its label in the value column and its
+            // text in the label column.
+            let (mark, color, label) = match t.kind {
+                Kind::Toggle if settings.is_on(n) => ("[x]".to_string(), GREEN, t.label),
+                Kind::Toggle => ("[ ]".to_string(), COMMENT, t.label),
+                Kind::Number { unit, .. } => (format!("{}{unit}", settings.get(n)), CYAN, t.label),
+                Kind::Text => (t.label.to_string(), FG, ""),
+            };
+            let mut spans = vec![Span::styled(format!(" {mark:<9}"), style.fg(color))];
+            if !label.is_empty() {
+                spans.push(Span::styled(format!("{label} "), style));
+            }
+            if matches!(t.kind, Kind::Text) && edit.is_none() {
+                spans.push(match settings.author() {
+                    "" => Span::styled("(not set) ", style.fg(COMMENT)),
+                    name => Span::styled(format!("{name} "), style.fg(CYAN)),
+                });
+            }
+            Line::from(spans)
         })
         .collect();
-    lines.push(Line::raw(""));
-    lines.push(hints(&[
-        ("space", "toggle"),
+    let list_hints = hints(&[
+        ("space", "toggle / edit"),
         ("h l", "change"),
         ("esc", "close"),
-    ]));
-    let width = lines.iter().map(Line::width).max().unwrap_or(0) as u16 + 4;
+    ]);
+    // The width of the popup stays the same while the text is in edit.
+    let width = lines
+        .iter()
+        .chain([&list_hints])
+        .map(Line::width)
+        .max()
+        .unwrap_or(0) as u16
+        + 4;
+    // A line between the author and the display settings.
+    let rule = "─".repeat(width.saturating_sub(4) as usize);
+    lines.insert(
+        settings::AUTHOR + 1,
+        Line::styled(format!(" {rule}"), Style::new().fg(COMMENT)),
+    );
+    lines.push(Line::raw(""));
+    lines.push(if edit.is_some() {
+        hints(&[("enter", "save"), ("esc", "cancel")])
+    } else {
+        list_hints
+    });
     let area = popup(area, width.max(30), lines.len() as u16 + 2);
     f.render_widget(Clear, area);
     f.render_widget(Paragraph::new(lines).block(block("Settings", true)), area);
+    if let Some(edit) = edit {
+        // The input takes the place of the text, after the label.
+        let inner = area.inner(Margin::new(1, 1));
+        let row = Rect {
+            x: inner.x + 10,
+            y: inner.y + sel as u16,
+            width: inner.width.saturating_sub(11),
+            height: 1,
+        };
+        draw_line_edit(f, edit, row);
+    }
+}
+
+/// The creation time, the author and the close time of an issue.
+fn issue_dates(i: &Issue) -> String {
+    let time = |t: &str| t.replacen('T', " ", 1).trim_end_matches('Z').to_string();
+    let mut text = format!("created {} UTC", time(&i.created));
+    if !i.author.is_empty() {
+        text.push_str(&format!(" by {}", i.author));
+    }
+    if !i.closed.is_empty() {
+        text.push_str(&format!(", closed {} UTC", time(&i.closed)));
+    }
+    text
 }
 
 type KeyHelp = &'static [(&'static str, &'static [(&'static str, &'static str)])];

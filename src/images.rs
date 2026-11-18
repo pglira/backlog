@@ -1,10 +1,10 @@
 //! Images in the text fields: read them from the clipboard or from a pasted
-//! file path, store them next to the backlog file, and draw them with a
-//! terminal graphics protocol.
+//! file path, store them in the `images` directory of the backlog, and draw
+//! them with a terminal graphics protocol.
 //!
 //! A field refers to an image with a Markdown link such as
-//! `![Image #1](.backlog/images/0123456789abcdef.png)`. The path is relative
-//! to the directory of the backlog file. The file name is a hash of the
+//! `![Image #1](../images/0123456789abcdef.png)`. The path is relative to
+//! the directory of the issue files. The file name is a hash of the
 //! content, so that the same image is stored once.
 
 use std::cell::RefCell;
@@ -24,8 +24,8 @@ use ratatui_image::Resize;
 use ratatui_image::picker::Picker;
 use ratatui_image::sliced::{SignedPosition, SlicedImage, SlicedProtocol};
 
-/// The directory of the images, relative to the directory of the backlog file.
-pub const DIR: &str = ".backlog/images";
+/// The directory of the images, relative to the directory of the issue files.
+pub const DIR: &str = "../images";
 /// The image types that the clipboard can give, with their file extensions,
 /// in the order of preference.
 const MIME_TYPES: [(&str, &str); 4] = [
@@ -297,7 +297,7 @@ mod tests {
         let found = [path.as_str(), quoted.as_str(), url.as_str()].map(from_pasted_path);
         let missing = from_pasted_path(&format!("{path}.txt"));
         let text = from_pasted_path("hello");
-        let stored = store(&dir, b"data", "png").unwrap();
+        let stored = store(&dir.join("issues"), b"data", "png").unwrap();
         fs::remove_dir_all(&dir).unwrap();
 
         for f in found {

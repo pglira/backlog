@@ -1,4 +1,4 @@
-//! backlog: a terminal UI for the issues in a `.backlog.md` file.
+//! backlog: a terminal UI for the issues in a `.backlog` directory.
 
 mod app;
 mod backlog;
@@ -28,14 +28,15 @@ use ratatui::crossterm::terminal::{
 use ratatui_image::picker::Picker;
 
 use app::{App, Effect};
-use backlog::{Backlog, FILE_NAME};
+use backlog::{Backlog, DIR_NAME};
 
 const USAGE: &str = "\
-usage: backlog [FILE]
+usage: backlog [DIR]
        backlog -V | --version
 
-Manage the issues in FILE. Without FILE, use the nearest .backlog.md
-in the current directory or one of its parents.
+Manage the issues in the backlog directory DIR, or in DIR/.backlog if it
+exists. Without DIR, use the nearest .backlog directory in the current
+directory or one of its parents.
 Press ? in the program for the key bindings.";
 
 fn main() -> ExitCode {
@@ -58,10 +59,17 @@ fn run() -> io::Result<()> {
             println!("backlog {}", env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
-        Some(arg) => PathBuf::from(arg),
+        Some(arg) => {
+            let arg = PathBuf::from(arg);
+            if arg.join(DIR_NAME).is_dir() {
+                arg.join(DIR_NAME)
+            } else {
+                arg
+            }
+        }
         None => {
             let cwd = env::current_dir()?;
-            Backlog::find(&cwd).unwrap_or_else(|| cwd.join(FILE_NAME))
+            Backlog::find(&cwd).unwrap_or_else(|| cwd.join(DIR_NAME))
         }
     };
 

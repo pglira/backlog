@@ -4,6 +4,7 @@
 //! ```toml
 //! details = true
 //! image_width = 20
+//! author = "Jane Doe"
 //! ```
 //!
 //! Comments, empty lines and unknown keys stay in the file when it is saved.
@@ -22,18 +23,27 @@ pub enum Kind {
         step: u16,
         unit: &'static str,
     },
+    /// Free text, written as a quoted string.
+    Text,
 }
 
 pub struct Setting {
     pub key: &'static str,
     pub label: &'static str,
     pub kind: Kind,
-    /// The default value; 1 is on and 0 is off for a toggle.
+    /// The default value; 1 is on and 0 is off for a toggle. A text has no
+    /// default value and starts empty.
     pub default: u16,
 }
 
 /// All settings, in the order of the settings popup.
-pub const SETTINGS: [Setting; 7] = [
+pub const SETTINGS: [Setting; 8] = [
+    Setting {
+        key: "author",
+        label: "Author",
+        kind: Kind::Text,
+        default: 0,
+    },
     Setting {
         key: "details",
         label: "Show the details at start",
@@ -89,18 +99,20 @@ pub const SETTINGS: [Setting; 7] = [
 ];
 
 /// The index of each setting in `SETTINGS`.
-pub const DETAILS: usize = 0;
-pub const SPLIT: usize = 1;
-pub const HIDE_CLOSED: usize = 2;
-pub const NEWEST_FIRST: usize = 3;
-pub const IMAGES: usize = 4;
-pub const IMAGE_WIDTH: usize = 5;
-pub const ROUNDED: usize = 6;
+pub const AUTHOR: usize = 0;
+pub const DETAILS: usize = 1;
+pub const SPLIT: usize = 2;
+pub const HIDE_CLOSED: usize = 3;
+pub const NEWEST_FIRST: usize = 4;
+pub const IMAGES: usize = 5;
+pub const IMAGE_WIDTH: usize = 6;
+pub const ROUNDED: usize = 7;
 
 type Values = [u16; SETTINGS.len()];
 
 pub struct Settings {
     values: Values,
+    author: String,
     /// The path of the file; `None` if no configuration directory is known.
     path: Option<PathBuf>,
 }
@@ -113,8 +125,10 @@ impl Settings {
             .as_ref()
             .and_then(|p| fs::read_to_string(p).ok())
             .unwrap_or_default();
+        let (values, author) = parse(&text);
         Settings {
-            values: parse(&text),
+            values,
+            author,
             path,
         }
     }
@@ -124,6 +138,7 @@ impl Settings {
     pub fn defaults() -> Settings {
         Settings {
             values: SETTINGS.map(|s| s.default),
+            author: String::new(),
             path: None,
         }
     }
@@ -136,14 +151,30 @@ impl Settings {
         self.values[n] != 0
     }
 
+    /// The name of the user, the author of new issues; empty if not set.
+    pub fn author(&self) -> &str {
+        &self.author
+    }
+
+    /// Set the name of the user and write the file if the name changes.
+    pub fn set_author(&mut self, name: &str) -> io::Result<()> {
+        let name = name.trim();
+        if name == self.author {
+            return Ok(());
+        }
+        self.author = name.to_string();
+        self.save()
+    }
+
     /// Change the setting `n` and write the file: toggle a toggle, and move a
-    /// number by `dir` steps.
+    /// number by `dir` steps. A text does not change.
     pub fn change(&mut self, n: usize, dir: i32) -> io::Result<()> {
         let value = match SETTINGS[n].kind {
             Kind::Toggle => u16::from(!self.is_on(n)),
             Kind::Number { step, .. } => {
                 (self.values[n] as i32 + dir * step as i32).clamp(0, u16::MAX as i32) as u16
             }
+            Kind::Text => return Ok(()),
         };
         self.set(n, value)
     }
@@ -167,7 +198,7 @@ impl Settings {
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir)?;
         }
-        fs::write(path, update(&old, &self.values))
+        fs::write(path, update(&old, &self.values, &self.author))
     }
 }
 
@@ -175,15 +206,39 @@ fn clamp(n: usize, value: u16) -> u16 {
     match SETTINGS[n].kind {
         Kind::Toggle => value.min(1),
         Kind::Number { min, max, .. } => value.clamp(min, max),
+        Kind::Text => 0,
     }
 }
 
-/// The value of the setting `n` as text: `true` / `false` or a number.
-fn format(n: usize, value: u16) -> String {
+/// The value of the setting `n` as text: `true` / `false`, a number, or a
+/// quoted string.
+fn format(n: usize, values: &Values, author: &str) -> String {
     match SETTINGS[n].kind {
-        Kind::Toggle => (value != 0).to_string(),
-        Kind::Number { .. } => value.to_string(),
+        Kind::Toggle => (values[n] != 0).to_string(),
+        Kind::Number { .. } => values[n].to_string(),
+        Kind::Text => quote(author),
     }
+}
+
+/// A TOML basic string.
+fn quote(text: &str) -> String {
+    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// The text of a TOML basic string, or the trimmed text if it has no quotes.
+fn unquote(value: &str) -> String {
+    let Some(inner) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) else {
+        return value.to_string();
+    };
+    let mut out = String::new();
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => out.extend(chars.next()),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 fn config_path() -> Option<PathBuf> {
@@ -194,15 +249,35 @@ fn config_path() -> Option<PathBuf> {
     Some(base.join("backlog").join("config.toml"))
 }
 
-/// Split a line into its key and value, without a trailing comment.
+/// Split a line into its key and value, without a trailing comment. A `#`
+/// in a quoted value does not start a comment.
 fn key_value(line: &str) -> Option<(&str, &str)> {
-    let line = line.split('#').next()?;
     let (key, value) = line.split_once('=')?;
-    Some((key.trim(), value.trim()))
+    if key.contains('#') {
+        return None;
+    }
+    let value = value.trim();
+    let value = match value.strip_prefix('"') {
+        Some(rest) => {
+            let mut escaped = false;
+            let end = rest.char_indices().find(|&(_, c)| {
+                let end = c == '"' && !escaped;
+                escaped = c == '\\' && !escaped;
+                end
+            });
+            match end {
+                Some((i, _)) => &value[..i + 2],
+                None => value,
+            }
+        }
+        None => value.split('#').next()?.trim(),
+    };
+    Some((key.trim(), value))
 }
 
-fn parse(text: &str) -> Values {
+fn parse(text: &str) -> (Values, String) {
     let mut values = SETTINGS.map(|s| s.default);
+    let mut author = String::new();
     for (key, value) in text.lines().filter_map(key_value) {
         let Some(n) = SETTINGS.iter().position(|s| s.key == key) else {
             continue;
@@ -214,23 +289,31 @@ fn parse(text: &str) -> Values {
                 Ok(v) => clamp(n, v),
                 Err(_) => continue,
             },
+            (Kind::Text, v) => {
+                author = unquote(v).trim().to_string();
+                continue;
+            }
             _ => continue,
         };
         values[n] = value;
     }
-    values
+    (values, author)
 }
 
 /// Write `values` into the text of the settings file: replace the lines of
 /// the known keys, keep all other lines, and add the missing keys at the end.
-fn update(old: &str, values: &Values) -> String {
+fn update(old: &str, values: &Values, author: &str) -> String {
     let mut written = [false; SETTINGS.len()];
     let mut out = String::new();
     for line in old.lines() {
         let known = key_value(line).and_then(|(k, _)| SETTINGS.iter().position(|s| s.key == k));
         match known {
             Some(n) if !written[n] => {
-                out.push_str(&format!("{} = {}\n", SETTINGS[n].key, format(n, values[n])));
+                out.push_str(&format!(
+                    "{} = {}\n",
+                    SETTINGS[n].key,
+                    format(n, values, author)
+                ));
                 written[n] = true;
             }
             Some(_) => {}
@@ -242,7 +325,7 @@ fn update(old: &str, values: &Values) -> String {
     }
     for (n, s) in SETTINGS.iter().enumerate() {
         if !written[n] {
-            out.push_str(&format!("{} = {}\n", s.key, format(n, values[n])));
+            out.push_str(&format!("{} = {}\n", s.key, format(n, values, author)));
         }
     }
     out
@@ -254,26 +337,41 @@ mod tests {
 
     #[test]
     fn parse_values() {
-        assert_eq!(parse("")[DETAILS], 1);
-        assert_eq!(parse("details = false\n")[DETAILS], 0);
-        assert_eq!(parse("# c\ndetails=false # off\nother = 1\n")[DETAILS], 0);
-        assert_eq!(parse("details = maybe\n")[DETAILS], 1);
-        assert_eq!(parse("image_width = 30\n")[IMAGE_WIDTH], 30);
-        assert_eq!(parse("image_width = 500\n")[IMAGE_WIDTH], 60);
-        assert_eq!(parse("image_width = wide\n")[IMAGE_WIDTH], 20);
+        assert_eq!(parse("").0[DETAILS], 1);
+        assert_eq!(parse("details = false\n").0[DETAILS], 0);
+        assert_eq!(parse("# c\ndetails=false # off\nother = 1\n").0[DETAILS], 0);
+        assert_eq!(parse("details = maybe\n").0[DETAILS], 1);
+        assert_eq!(parse("image_width = 30\n").0[IMAGE_WIDTH], 30);
+        assert_eq!(parse("image_width = 500\n").0[IMAGE_WIDTH], 60);
+        assert_eq!(parse("image_width = wide\n").0[IMAGE_WIDTH], 20);
+        assert_eq!(parse("").1, "");
+        assert_eq!(
+            parse("author = \"Jane \\\"J#\\\" Doe\" # me\n").1,
+            "Jane \"J#\" Doe"
+        );
+        assert_eq!(parse("author = Jane # me\n").1, "Jane");
     }
 
     #[test]
     fn update_keeps_other_lines() {
         let mut values = SETTINGS.map(|s| s.default);
         values[DETAILS] = 0;
-        let all = "details = false\nsplit = 45\nhide_closed = false\nnewest_first = false\nimages = true\nimage_width = 20\nrounded = true\n";
-        assert_eq!(update("", &values), all);
+        let all = "author = \"Jane \\\"J\\\" Doe\"\ndetails = false\nsplit = 45\nhide_closed = false\nnewest_first = false\nimages = true\nimage_width = 20\nrounded = true\n";
+        let author = "Jane \"J\" Doe";
+        assert_eq!(update("", &values, author), all);
+        assert_eq!(parse(all).1, author);
         assert_eq!(
-            update("# Settings\ndetails = true\nother = 1\n", &values),
-            format!("# Settings\ndetails = false\nother = 1\n{}", &all[16..])
+            update("# Settings\ndetails = true\nother = 1\n", &values, author),
+            "# Settings\ndetails = false\nother = 1\nauthor = \"Jane \\\"J\\\" Doe\"\nsplit = 45\nhide_closed = false\nnewest_first = false\nimages = true\nimage_width = 20\nrounded = true\n"
         );
-        assert_eq!(update("details = true\ndetails = true\n", &values), all);
+        assert_eq!(
+            update(
+                "author = \"x\"\ndetails = true\ndetails = true\n",
+                &values,
+                author
+            ),
+            all
+        );
     }
 
     #[test]
